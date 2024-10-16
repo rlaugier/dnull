@@ -189,14 +189,18 @@ class DN_FOV_diam_gau_rad(zdx.Base):
         self.D = jp.asarray(D*uD.to(units.m), dtype=float)
         self.offset = jp.asarray(ni_fov.data_table["offsets"], dtype=float)
 
-    def fov_function(self, x, y):
+    def fov_function(self, x, y, lambs):
         """
-        Method made to be transferred to the main
-        nifits
+        Returns the phasor corresponding to position in FOV
+
+        Shape: [n_frames n_wavelengths n_points, ]
         """
         r_0 = (1/2*self.dn_wavelength.lambs/self.dn_fov_D)# *units.rad.to(units.mas)
         r = jp.hypot(x[None, None, :] - self.fov.offset[:,:, 0, None],
                         y[None,None, :] - self.fov.offset[:,:, 1, None])
+        phasor = jp.exp(-(r[:,:]/r_0[:,None])**2)
+        return phasor.astype(jp.complex64)
+
 
 
 from typing import Union, List, Callable
@@ -244,7 +248,7 @@ class DN_PointCollection(object):
     ds_mas2: jp.ndarray = None
     shape: tuple = None
     orig_shape: tuple = None
-    unit: jp.ndarray = None
+    unit: unit.Unit = None
     def __init__(self, aa, bb, ds_mas2, unit=units.mas,
                     shape=None, orig_shape=None):
         self.aa = aa
@@ -413,6 +417,9 @@ class DN_PointCollection(object):
         return DN_PointCollection(aa, bb, self.ds_mas2, unit=self.units,
                     shape=self.shape, orig_shape=self.orig_shape)
 
+    def __add__(self, other):
+        return 
+
 
 def test_attr(obj, name):
     if hasattr(obj, name):
@@ -470,6 +477,7 @@ class DN_NIFITS(zdx.Base):
             if test_attr(anifits, niname):
                 myclass = getclass(dnname.upper())
                 myobj = myclass(getattr(anifits, niname))
+                mydn = myclass(myobj)
                 extensions[dnname] = mydn
         return cls(**extensions)
             
@@ -482,6 +490,9 @@ class DN_NIFITS(zdx.Base):
 
         """
         pass
+
+    
+        
 
     @property
     def n_collectors(self):
@@ -574,6 +585,12 @@ class DN_Source_BB(zdx.Base):
         blackbody = DN_BB(Teq, cross_section=cross_section, col_dens=density)
         cls(locs, blackbody)
 
+class DN_Source_Base(zdx.Base):
+    locs: DN_PointCollection
+    irradiance: jp.ndarray
+
+    def __init__(self, lap)
+
 class DN_Source_Layered(zdx.Base):
     continuum: DN_BB
     layers: list
@@ -645,12 +662,130 @@ class DN_Observation(zdx.Base):
         self.nuisance = dn_nuisance
         self.interest = dn_interest
 
+    def geometric_phasor(self, sourcelist):
+        """
+        Returns the complex phasor corresponding to the locations
+        of the family of sources
+        
+        **Parameters:**
+        
+        * ``alpha``         : (n_frames, n_points) The coordinate matched to X in the array geometry
+        * ``beta``          : (n_frames, n_points) The coordinate matched to Y in the array geometry
+        * ``anarray``       : The array geometry (n_input, 2)
+        * ``include_mod``   : Include the modulation phasor
+        
+        **Returns** : A vector of complex phasors
+
+        """
+        allbs = []
+        for asource in sourcelist:
+            alpha, beta = asource.locs.coords_rad
+            ds_mas2 = asource.locs.ds_mas2
+            xy_array = jp.array(self.nifits.ni_mod.appxy)
+            lambs = jp.array(self.nifits.oi_wavelength.lambs)
+            k = 2*jp.pi/lambs
+            a = jp.array((alphas, betas), dtype=jp.float64)
+            phi = k[:,None,None,None] * jp.einsum("t a x, x m -> t a m", xy_array[:,:,:], a[:,:])
+            b = jp.exp(1j*phi)
+            allbs.append(b)
+        bs = jp.concatenateate(allbs, axis=-1)
+        return b.transpose((1,0,2,3))
+
+    def get_modulation_phasor(self):
+        """
+        Shape: [n_frames n_wavelengths n_inputs]
+        
+        """
+        raw_mods = jp.array(self.dn_nifits.ni_mod.all_phasors)
+        col_area = jp.array(self.dn_nifits.ni_mod.arrcol)
+        mods =  raw_mods*jp.sqrt(col_area)[:,None,:]
+        return mods
+
+    def get_fov_function(self, sourcelist):
+        """
+        Shape: [n_frames, n_wavelengths, n_locs]
+        """
+        wavelengths = self.dn_nifits.dn_wavelengths.lambs
+        allgs = []
+        for asource in sourcelist:
+            alpha, beta = asource.locs.coords_rad
+            allgs.append(self.dn_nifits.dn_fov.fov_function(alpha,beta))
+        gs = jp.concatenate(allgs, axis=-1)
+        return gs
+
+    def get_Is(self, xs):
+        """
+        Get intensity from an array of sources.
+
+        """
+        E = jp.einsum("w o i , t w i m -> t w o m", self.dn_nifits.dn_catm.M, xs)
+        I = jp.abs(E)**2
+        return I
+
+    def get_KIs(self,
+                    Iarray:jp.ndarray):
+        r"""
+        Get the prost-processed observable from an array of output intensities. The
+        post-processing matrix K is taken from ``self.nifits.ni_kmat.K``
+
+        Args:
+            I     : (n_frames, n_wl, n_outputs, n_batch)
+
+        Returns:
+            The vector :math:`\boldsymbol{\kappa} = \mathbf{K}\cdot\mathbf{I}`
+
+        """
+        KI = jp.einsum("k o, t w o m -> t w k m", self.nifits.ni_kmat.K[:,:], Iarray)
+        return KI
+
+
+    def get_all_outs(self,sourcelist,
+                        kernels=False):
+        """
+        Compute the transmission map for an array of coordinates. The map can be seen
+        as equivalent collecting power expressed in [m^2] for each point sampled so as
+        to facilitate comparison with models in Jansky multiplied by the exposure time
+        of each frame (available in `nifits.ni_mod.int_time`).
+
+        Args:
+            alphas  : ArrayLike [rad] 1D array of coordinates in right ascension
+            betas   : ArrayLike [rad] 1D array of coordinates in declination
+            kernels : (bool) if True, then computes the post-processed
+                  observables as per the KMAT matrix.
+
+        Returns:
+            if ``kernels`` is False: the *raw transmission output*.
+            if ``kernels`` is True: the *differential observable*.
+
+        .. hint:: **Shape:** (n_frames, n_wl, n_outputs, n_points)
+
+        """
+        # The phasor from the incidence on the array:
+        xs = self.geometric_phasor(sourcelist)
+        # print("xs", xs)
+        
+        # The phasor from the spatial filtering:
+        x_inj_nuisance = self.dn_nifits.dn_fov.get_fov_function(sourcelist)
+        # print("x_inj", x_inj)
+        
+        # The phasor from the internal modulation
+        # x_mod = self.nifits.ni_mod.all_phasors
+        x_mod = self.get_modulation_phasor()
+        # print("x_mod", x_mod)
+        
+        # this is actually a collecting area
+        Is = self.get_Is(xs * x_inj[:,:,None,:] * x_mod[:,:,:,None])
+        if kernels:
+            KIs = self.get_KIs(Is)
+            return KIs
+        else:
+            return Is
 
 
 class DN_Error_Estimation(DN_Observation):
     error_phasors: DN_CPX
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__nit__(*args, **kwargs)
         n_collectors = self.dn_nifits.n_collectors
         self.error_phasors = DN_CPX.zeros(n_collectors)
 
