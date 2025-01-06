@@ -653,10 +653,27 @@ class SourceList(zdx.Base):
             raise AttributeError(f"{key} not in {self.sources.keys()}")
 
 
+class DN_ErrorPhasorPistonPointing(zdx.Base):
+    piston : jp.ndarray
+    pointing : jp.ndarray
+
+    def __init__(self, piston, pointing):
+        self.piston = jp.asarray(piston, dtype=float)
+        self.pointing = jp.asarray(pointing, dtype=float)
+
+    def phasor(self, lambs):
+        amp = (1 - self.pointing**2 / 2)
+        phase = self.piston * 2 * jp.pi / lambs
+        return amp * jp.exp(1j * phase)
+    
+
+DN_ErrorPhasorType = Union[DN_ErrorPhasorPistonPointing, ]
+
 class DN_Observation(zdx.Base):
     dn_nifits: DN_NIFITS
     nuisance: SourceList
     interest: SourceList
+    error_phasor : DN_ErrorPhasorType
     def __init__(self, dn_nifits, dn_nuisance, dn_interest):
         self.dn_nifits = dn_nifits
         self.nuisance = dn_nuisance
