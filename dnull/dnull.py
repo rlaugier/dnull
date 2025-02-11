@@ -114,7 +114,7 @@ class DN_IOUT(zdx.Base):
 class DN_CATM(zdx.Base):
     M: DN_CPX
     def __init__(self, ni_catm: io.oifits.NI_CATM):
-        self.M = DN_CPX(ni_catm.M, dtype=jp.complex64)
+        self.M = DN_CPX(ni_catm.M)
 
 class DN_KIOUT(zdx.Base):
     kiout: jp.ndarray
@@ -248,7 +248,7 @@ class DN_PointCollection(object):
     ds_mas2: jp.ndarray = None
     shape: tuple = None
     orig_shape: tuple = None
-    unit: unit.Unit = None
+    unit: units.Unit = None
     def __init__(self, aa, bb, ds_mas2, unit=units.mas,
                     shape=None, orig_shape=None):
         self.aa = aa
@@ -423,7 +423,7 @@ class DN_PointCollection(object):
 
 def test_attr(obj, name):
     if hasattr(obj, name):
-        return obj.name is not None
+        return getattr(obj, name) is not None
     else:
         return False
 
@@ -589,7 +589,9 @@ class DN_Source_Base(zdx.Base):
     locs: DN_PointCollection
     irradiance: jp.ndarray
 
-    def __init__(self, lap)
+    def __init__(self, locs, irradiance):
+        self.locs = locs
+        self.irradiance = irradiance
 
 class DN_Source_Layered(zdx.Base):
     continuum: DN_BB
