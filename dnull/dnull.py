@@ -41,6 +41,9 @@ class DN_CPX(zdx.Base):
     @property
     def cpx(self):
         return self.real + 1j*self.imag
+    @property
+    def shape(self):
+        return self.real.shape
 
     @classmethod
     def ones(cls, shape):
@@ -157,6 +160,9 @@ class DN_MOD(zdx.Base):
         self.arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
         self.fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
                                                             dtype=int)
+    @property
+    def appxy(self):
+        return self.app_xy
 
     @property
     def n_series(self):
@@ -176,6 +182,31 @@ class DN_MOD(zdx.Base):
         raise NotImplementedError(self.dateobs)
         return None
 
+    
+
+class DN_FOV(object):
+    def __init__(self, ni_fov: io.oifits.NI_FOV):
+        """
+            This class is a generic class that is identifies and creates the
+        corredt DN_FOV class. It will return an object from the correct class instead.
+
+        At this point, it can only work with the `diameter_gaussian_radial` mode.
+        """
+        assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
+                    NotImplementedError("Only diameter_gaussian_radial implemented")
+        self = DN_FOV_diam_gau_rad(ni_fov)
+
+    def correct_fov_class(self, ni_fov: io.oifits.NI_FOV):
+        """
+            This method identifies the correct type of DN_FOV object
+        to create, initializes and returns it.
+
+        At this point, it can only work with the `diameter_gaussian_radial` mode.
+        """
+        assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
+                    NotImplementedError("Only diameter_gaussian_radial implemented")
+        if ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial":
+            return DN_FOV_diam_gau_rad
 
 
 class DN_FOV_diam_gau_rad(zdx.Base):
@@ -184,8 +215,8 @@ class DN_FOV_diam_gau_rad(zdx.Base):
     def __init__(self, ni_fov: io.oifits.NI_FOV):
         assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
-        D = ni_fov.data_table["FOV_TELDIAM"]
-        uD = units.Unit(ni_fov.data_table["FOV_TELDIAM_UNIT"])
+        D = ni_fov.header["FOV_TELDIAM"]
+        uD = units.Unit(ni_fov.header["FOV_TELDIAM_UNIT"])
         self.D = jp.asarray(D*uD.to(units.m), dtype=float)
         self.offset = jp.asarray(ni_fov.data_table["offsets"], dtype=float)
 
@@ -195,9 +226,9 @@ class DN_FOV_diam_gau_rad(zdx.Base):
 
         Shape: [n_frames n_wavelengths n_points, ]
         """
-        r_0 = (1/2*self.dn_wavelength.lambs/self.dn_fov_D)# *units.rad.to(units.mas)
-        r = jp.hypot(x[None, None, :] - self.fov.offset[:,:, 0, None],
-                        y[None,None, :] - self.fov.offset[:,:, 1, None])
+        r_0 = (1/2*lambs/self.D)# *units.rad.to(units.mas)
+        r = jp.hypot(x[None, None, :] - self.offset[:,:, 0, None],
+                        y[None,None, :] - self.offset[:,:, 1, None])
         phasor = jp.exp(-(r[:,:]/r_0[:,None])**2)
         return phasor.astype(jp.complex64)
 
@@ -205,7 +236,7 @@ class DN_FOV_diam_gau_rad(zdx.Base):
 
 from typing import Union, List, Callable
 
-DN_FOV_TYPE = Union[DN_FOV_diam_gau_rad,]
+DN_FOV_TYPE = Union[DN_FOV, DN_FOV_diam_gau_rad,]
 
 rad2mas = units.rad.to(units.mas)
 mas2rad = units.mas.to(units.rad)
@@ -257,7 +288,11 @@ class DN_PointCollection(object):
         self.shape = self.aa.shape
         self.ds_mas2 = ds_mas2
         if not hasattr(self, "orig_shape"):
-            self.orig_shape = self.shape
+                self.orig_shape = self.shape
+        elif self.orig_shape is None:
+                self.orig_shape = self.shape
+
+            
 
     @classmethod
     def from_uniform_disk(cls, radius=None,
@@ -420,6 +455,48 @@ class DN_PointCollection(object):
     def __add__(self, other):
         return 
 
+    def plot_frame(self, z=None, frame_index=0, wl_index=0,
+                        out_index=0, mycmap=None, marksize_increase=1.0,
+                        colorbar=True, xlabel=True, title=True):
+        """
+            A convenience method to plot values of the point collection
+        spatially.
+
+        Args:
+            z : (float) The value to plot for color
+            frame_index : (int) The frame index to plot
+            wl_index : (int)
+            out_index :
+            mycmap : 
+            marksize_increase :
+            colorbar : 
+            xlabel : 
+            title :
+            
+        """
+        import matplotlib.pyplot as plt
+        marksize = marksize_increase * 50000/self.shape[0]
+        if len(self.orig_shape) == 1:
+            plt.scatter(*self.coords, c=z[frame_index,wl_index,out_index,:],
+                    cmap=mycmap, s=marksize)
+            plt.gca().set_aspect("equal")
+        else:
+            plt.imshow(z[frame_index,wl_index,out_index,:].reshape((self.orig_shape)),
+                cmap=mycmap, extent=self.extent)
+            plt.gca().set_aspect("equal")
+            
+        if colorbar:
+            plt.colorbar()
+        if xlabel is True:
+            plt.xlabel("Relative position [mas]")
+        elif xlabel is not False:
+            plt.xlabel(xlabel)
+        if title is True:
+            plt.title(f"Output {out_index} for frame {frame_index}")
+        elif title is not False:
+            plt.title(title)
+
+
 
 def test_attr(obj, name):
     if hasattr(obj, name):
@@ -428,15 +505,15 @@ def test_attr(obj, name):
         return False
 
 class DN_NIFITS(zdx.Base):
-    dn_catm: DN_CATM = None
-    dn_fov: DN_FOV_TYPE = None
-    dn_kmat: DN_KMAT = None
-    dn_wavelength: DN_WAVELENGTH = None
-    dn_target: DN_TARGET = None
-    dn_mod: DN_MOD = None
-    dn_iout: DN_IOUT = None
-    dn_kiout: DN_KIOUT = None
-    dn_kcov: DN_KCOV = None
+    dn_catm: DN_CATM
+    dn_fov: DN_FOV_TYPE
+    dn_kmat: DN_KMAT
+    dn_wavelength: DN_WAVELENGTH
+    dn_target: DN_TARGET
+    dn_mod: DN_MOD
+    dn_iout: DN_IOUT
+    dn_kiout: DN_KIOUT
+    dn_kcov: DN_KCOV
     def __init__(self,
                 dn_catm: DN_CATM = None,
                 dn_fov: DN_FOV_TYPE = None,
@@ -448,8 +525,17 @@ class DN_NIFITS(zdx.Base):
                 dn_kiout: DN_KIOUT = None,
                 dn_kcov: DN_KCOV = None):
         
-        self.fov_function = self.fov.fov_function
-        pass
+        self.dn_catm = dn_catm
+        self.dn_fov = dn_fov
+        self.dn_kmat = dn_kmat
+        self.dn_wavelength = dn_wavelength
+        self.dn_target = dn_target
+        self.dn_mod = dn_mod
+        self.dn_iout = dn_iout
+        self.dn_kiout = dn_kiout
+        self.dn_kcov = dn_kcov
+        # self.fov_function = self.dn_fov.fov_function
+
     @classmethod
     def from_nifits(cls, anifits):
         names_dn = [
@@ -461,37 +547,48 @@ class DN_NIFITS(zdx.Base):
                     "dn_mod",
                     "dn_iout",
                     "dn_kiout",
-                    "dn_kcov"]
+                    "dn_kcov",
+                    "dn_array"]
         names_ni = [
                     "ni_catm",
                     "ni_fov",
                     "ni_kmat",
-                    "ni_wavelength",
-                    "ni_target",
+                    "oi_wavelength",
+                    "oi_target",
                     "ni_mod",
                     "ni_iout",
                     "ni_kiout",
-                    "ni_kcov"]
+                    "ni_kcov",
+                    "oi_array"]
         extensions = {}
         for niname, dnname in zip(names_ni, names_dn):
             if test_attr(anifits, niname):
                 myclass = getclass(dnname.upper())
                 myobj = myclass(getattr(anifits, niname))
-                mydn = myclass(myobj)
-                extensions[dnname] = mydn
+                print(niname, dnname)
+                # Exception for FOV: overwrite the object with
+                # the specific class instead of the generic one
+                if dnname == "dn_fov":
+                    print("Triggering dn_fov")
+                    myobj = myobj.correct_fov_class(getattr(anifits, niname))
+                    myobj = myobj(getattr(anifits, niname))
+                extensions[dnname] = myobj
+                    
+                    
+        print(extensions)
         return cls(**extensions)
             
         
 
-    def fov_function(self):
+    def fov_function(self, x, y):
         """
-        This method is meant to be replaced by the specific FOV function
-        during __init__
+        This method is a wrapper for the method of the fov
+        object. 
 
         """
-        pass
-
-    
+        lambs = self.dn_wavelength.lambs
+        fov_object = self.dn_fov
+        return self.dn_fov.fov_function(x, y, lambs)
         
 
     @property
@@ -563,7 +660,9 @@ class DN_Source_BB(zdx.Base):
     blackbody: DN_BB
     def __init__(self, locs: DN_PointCollection,
                     blackbody: DN_BB):
-        pass
+        self.locs = locs
+        self.blackbody = DN_BB
+
     @property
     def irradiance(self):
         pass
@@ -584,6 +683,15 @@ class DN_Source_BB(zdx.Base):
         density = jp.where(r_au<=0, 0., density)
         blackbody = DN_BB(Teq, cross_section=cross_section, col_dens=density)
         cls(locs, blackbody)
+
+    @classmethod
+    def uniform_disk(cls, locs, transformation,
+                     cross_section: jp.ndarray = None,
+                     T_eff: float = 5300,
+                     distance: float = 10):
+        mybb = DN_BB(T_eff, cross_section=cross_section,
+                            col_dens=None)
+        return cls(locs, mybb)
 
 class DN_Source_Base(zdx.Base):
     locs: DN_PointCollection
@@ -636,7 +744,10 @@ and a list of DN_Sources for `.interest`
 DN_Source = Union[DN_Source_Spectrum]
 
 class SourceList(zdx.Base):
-    """Basic class for modelling a set of normal distributions"""
+    """
+    Basic class for modelling a set of light
+    sources.
+    """
     sources : dict
     name : str
 
@@ -645,7 +756,7 @@ class SourceList(zdx.Base):
         self.sources = kwargs
 
     def __len__(self):
-        return len(sources)
+        return len(self.sources)
 
     def __getattr__(self, key):
         """Allows us to access the individual normals by their dictionary key"""
@@ -656,6 +767,10 @@ class SourceList(zdx.Base):
 
 
 class DN_ErrorPhasorPistonPointing(zdx.Base):
+    """
+        A class to define error realisations in the form
+    of a piston and pointing tuple.
+    """
     piston : jp.ndarray
     pointing : jp.ndarray
 
@@ -664,10 +779,30 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
         self.pointing = jp.asarray(pointing, dtype=float)
 
     def phasor(self, lambs):
+        """
+            Warning: This makes the effect of pointing acchromatic, which
+        is not what is expected. Add a chromatic effect on amp!
+        """
         amp = (1 - self.pointing**2 / 2)
-        phase = self.piston * 2 * jp.pi / lambs
-        return amp * jp.exp(1j * phase)
-    
+        phase = self.piston[:,None,:] * 2 * jp.pi / lambs[None,:,None]
+        return amp[:,None,:] * jp.exp(1j * phase)
+
+    @classmethod
+    def no_error(cls, mydn):
+        """
+        Creates a neutral error vector
+
+        Args:
+            mydn : a DN_NIFITS object to use for the shape of the arrays.
+        """
+        nwl = mydn.dn_wavelength.lambs.shape
+        n_frams = mydn.dn_mod.n_series
+        n_inputs = mydn.dn_mod.all_phasors.shape[-1]
+        piston = jp.zeros((n_frams, n_inputs))
+        pointing = jp.zeros((n_frams, n_inputs))
+        myobj = cls(piston=piston, pointing=pointing)
+        return myobj
+
 
 DN_ErrorPhasorType = Union[DN_ErrorPhasorPistonPointing, ]
 
@@ -676,10 +811,14 @@ class DN_Observation(zdx.Base):
     nuisance: SourceList
     interest: SourceList
     error_phasor : DN_ErrorPhasorType
-    def __init__(self, dn_nifits, dn_nuisance, dn_interest):
+    def __init__(self, dn_nifits, dn_nuisance, dn_interest,
+                        error_phasor):
         self.dn_nifits = dn_nifits
         self.nuisance = dn_nuisance
         self.interest = dn_interest
+        # TODO This is named a phasor but it is actually a piston
+        self.error_phasor = error_phasor
+
 
     def geometric_phasor(self, sourcelist):
         """
@@ -698,16 +837,16 @@ class DN_Observation(zdx.Base):
         """
         allbs = []
         for asource in sourcelist:
-            alpha, beta = asource.locs.coords_rad
+            alphas, betas = asource.locs.coords_rad
             ds_mas2 = asource.locs.ds_mas2
-            xy_array = jp.array(self.nifits.ni_mod.appxy)
-            lambs = jp.array(self.nifits.oi_wavelength.lambs)
+            xy_array = jp.array(self.dn_nifits.dn_mod.appxy)
+            lambs = jp.array(self.dn_nifits.dn_wavelength.lambs)
             k = 2*jp.pi/lambs
-            a = jp.array((alphas, betas), dtype=jp.float64)
+            a = jp.array((alphas, betas), dtype=jp.float32)
             phi = k[:,None,None,None] * jp.einsum("t a x, x m -> t a m", xy_array[:,:,:], a[:,:])
             b = jp.exp(1j*phi)
             allbs.append(b)
-        bs = jp.concatenateate(allbs, axis=-1)
+        bs = jp.concatenate(allbs, axis=-1)
         return b.transpose((1,0,2,3))
 
     def get_modulation_phasor(self):
@@ -715,20 +854,21 @@ class DN_Observation(zdx.Base):
         Shape: [n_frames n_wavelengths n_inputs]
         
         """
-        raw_mods = jp.array(self.dn_nifits.ni_mod.all_phasors)
-        col_area = jp.array(self.dn_nifits.ni_mod.arrcol)
-        mods =  raw_mods*jp.sqrt(col_area)[:,None,:]
+        raw_mods = jp.array(self.dn_nifits.dn_mod.all_phasors)
+        col_area = jp.array(self.dn_nifits.dn_mod.arrcol)
+        err_phas = self.error_phasor.phasor(self.dn_nifits.dn_wavelength.lambs)
+        mods = err_phas * raw_mods * jp.sqrt(col_area)[:,None,:]
         return mods
 
-    def get_fov_function(self, sourcelist):
+    def fov_function_wrapper(self, sourcelist):
         """
         Shape: [n_frames, n_wavelengths, n_locs]
         """
-        wavelengths = self.dn_nifits.dn_wavelengths.lambs
+        wavelengths = self.dn_nifits.dn_wavelength.lambs
         allgs = []
         for asource in sourcelist:
             alpha, beta = asource.locs.coords_rad
-            allgs.append(self.dn_nifits.dn_fov.fov_function(alpha,beta))
+            allgs.append(self.dn_nifits.dn_fov.fov_function(alpha,beta, wavelengths))
         gs = jp.concatenate(allgs, axis=-1)
         return gs
 
@@ -737,7 +877,7 @@ class DN_Observation(zdx.Base):
         Get intensity from an array of sources.
 
         """
-        E = jp.einsum("w o i , t w i m -> t w o m", self.dn_nifits.dn_catm.M, xs)
+        E = jp.einsum("w o i , t w i m -> t w o m", self.dn_nifits.dn_catm.M.cpx, xs)
         I = jp.abs(E)**2
         return I
 
@@ -754,7 +894,7 @@ class DN_Observation(zdx.Base):
             The vector :math:`\boldsymbol{\kappa} = \mathbf{K}\cdot\mathbf{I}`
 
         """
-        KI = jp.einsum("k o, t w o m -> t w k m", self.nifits.ni_kmat.K[:,:], Iarray)
+        KI = jp.einsum("k o, t w o m -> t w k m", self.dn_nifits.dn_kmat.K[:,:], Iarray)
         return KI
 
 
@@ -784,7 +924,7 @@ class DN_Observation(zdx.Base):
         # print("xs", xs)
         
         # The phasor from the spatial filtering:
-        x_inj_nuisance = self.dn_nifits.dn_fov.get_fov_function(sourcelist)
+        x_inj = self.fov_function_wrapper(sourcelist)
         # print("x_inj", x_inj)
         
         # The phasor from the internal modulation
@@ -802,6 +942,9 @@ class DN_Observation(zdx.Base):
 
 
 class DN_Error_Estimation(DN_Observation):
+    """
+        Use this to evaluate the uncertainty on the measurements
+    """
     error_phasors: DN_CPX
     def __init__(self, *args, **kwargs):
         super().__init__nit__(*args, **kwargs)
@@ -851,12 +994,5 @@ DN_Observation
 * DN_Source
     - locs
 """
-
-
-
-
-
-
-
 
 
