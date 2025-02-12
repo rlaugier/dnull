@@ -770,22 +770,35 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
     """
         A class to define error realisations in the form
     of a piston and pointing tuple.
+    D, the collector diameter is given to inform the link between
+    pointing error and the associated chromatic injection amplitude.
     """
     piston : jp.ndarray
     pointing : jp.ndarray
+    fourDsquare : jp.float32
 
-    def __init__(self, piston, pointing):
+    def __init__(self, piston, pointing, D):
         self.piston = jp.asarray(piston, dtype=float)
         self.pointing = jp.asarray(pointing, dtype=float)
+        self.fourDsquare = 4*D**2
 
     def phasor(self, lambs):
         """
-            Warning: This makes the effect of pointing acchromatic, which
-        is not what is expected. Add a chromatic effect on amp!
+        The effect of pointing can be modeled as such:
+        ```python
+            import sympy as sp
+            r, r_0, lamb_s, D = sp.symbols("r,r_0, lambda, D", real=True, positive=True)
+            e = sp.exp(-(r/r_0)**2)
+            e_series = sp.series(e.subs([(r_0, 1/2*lamb_s/D)]), r, n=4)
+            sp.print_latex(e_series)
+            e_series
+        ```
+        $ A(\\lambda) = 1 - \\frac{4.0 D^{2} r^{2}}{\\lambda^{2}} + O\\left(r^{4}\\right) $
         """
-        amp = (1 - self.pointing**2 / 2)
+        amp = (1 - self.fourDsquare / lambs[None,:,None]**2
+                        * self.pointing[:,None,:]**2)
         phase = self.piston[:,None,:] * 2 * jp.pi / lambs[None,:,None]
-        return amp[:,None,:] * jp.exp(1j * phase)
+        return amp[:,:,:] * jp.exp(1j * phase)
 
     @classmethod
     def no_error(cls, mydn):
@@ -794,13 +807,15 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
 
         Args:
             mydn : a DN_NIFITS object to use for the shape of the arrays.
+            D    : The main collector diameter
         """
         nwl = mydn.dn_wavelength.lambs.shape
         n_frams = mydn.dn_mod.n_series
         n_inputs = mydn.dn_mod.all_phasors.shape[-1]
         piston = jp.zeros((n_frams, n_inputs))
         pointing = jp.zeros((n_frams, n_inputs))
-        myobj = cls(piston=piston, pointing=pointing)
+        D = mydn.dn_fov.D
+        myobj = cls(piston=piston, pointing=pointing, D=D)
         return myobj
 
 
