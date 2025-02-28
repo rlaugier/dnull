@@ -2,6 +2,7 @@
     dnull offers a specialty backend ton NIFITS.
 It does not facilitate the exportation back to NIFITS
 nor the creation of NIFITS files from scratch.
+Import an nifits file through the DN_NIFITS constructor.
 
 Main classes:
 
@@ -18,7 +19,11 @@ import jax
 from jax import numpy as jp, scipy as jscipy
 import zodiax as zdx
 
+# Numpy is used to handle arays of strings.
+import numpy as np
+
 from astropy import units, constants as cst
+from einops import rearrange
 
 import sys
 def getclass(classname):
@@ -101,8 +106,92 @@ class DN_WAVELENGTH(zdx.Base):
     def dnus(self):
         assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
         return cst.c.value/self.dlambs
-    
 
+class DN_IOTAGS(zdx.Base):
+    outbright: jp.ndarray
+    outdark: jp.ndarray
+    outphot: jp.ndarray
+    inpola: np.ndarray
+    outpola: np.ndarray
+
+    def __init__(self, ni_iotags: io.oifits.NI_IOTAGS):
+        self.outbright = jp.asarray(ni_iotags.outbright, dtype=bool)
+        self.outdark = jp.asarray(ni_iotags.outdark, dtype=bool)
+        self.outphot = jp.asarray(ni_iotags.outphot, dtype=bool)
+        self.inpola = np.asarray(ni_iotags.inpola, dtype=str)
+        self.outpola = np.asarray(ni_iotags.outpola, dtype=str)
+
+    @property
+    def outbright(self):
+        """
+        The flags of bright outputs
+        """
+        return self.outbright
+    @property
+    def outdark(self):
+        """
+        The flags of dark outputs
+        """
+        return self.outdark
+    @property
+    def outphot(self):
+        """
+        The flags of photometric outputs
+        """
+        return self.outphot
+    @property
+    def outpola(self):
+        """
+        The polarization of outputs.
+        """
+        return self.outpola
+    @property
+    def inpola(self):
+        """
+        The polarization of inputs.
+        """
+        return self.inpola
+
+class DN_OSWAVELENGTH(zdx.Base):
+    """
+    An object storing the wavelength before a downsampling. This must have the
+    wavelength for each of the slice of the CATM matrix, each of the ``NI_MOD``
+    phasors and each column of the ``NI_DSAMP`` matrix.
+
+    If ``DN_OSWAVELENGTH`` is absent, assume that there is no over or down-
+    sampling and take the values directly from ``DN_WAVELENGTH``.
+
+    **Shorthands:**
+
+    * ``self.lambs`` : ``jp.ndarray`` [m] returns an array containing the center
+      of each spectral channel.
+    * ``self.dlmabs`` : ``jp.ndarray`` [m] an array containing the spectral bin
+      widths.
+    * ``self.nus`` : ``jp.ndarray`` [Hz] an array containing central frequencies
+      of the
+      spectral channels.
+    * ``self.dnus`` : ``jp.ndarray`` [Hz] an array containing the frequency bin
+      widths.
+
+    """
+    lambs: jp.ndarray
+    name: str
+
+    def __init__(self, ni_wavelength: io.oifits.OI_WAVELENGTH):
+        self.lambs = jp.asarray(ni_wavelength.lambs, dtype=float)
+        self.name = ni_wavelength.name
+
+    @property
+    def dlambs(self):
+        return jp.gradient(self.lambs)
+    @property
+    def nus(self):
+        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        return cst.c.value/self.lambs
+    @property
+    def dnus(self):
+        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        return cst.c.value/self.dlambs
 
 DN_TARGET = io.oifits.OI_TARGET
 
@@ -129,6 +218,23 @@ class DN_KIOUT(zdx.Base):
     def shape(self):
         return self.kiout.shape
 
+class DN_WKIOUT(DN_KIOUT):
+    Ws : jp.ndarray
+    def __init__(self, dn_kiout, Ws):
+        self.Ws = Ws
+        self.kiout = dn_kiout.kiout
+        self.unit = dn_kiout.unit
+        
+    def whitened_kiout(self):
+        data = self.data_table["value"].data
+        full_shape = data.shape
+        flat_full_shape = (full_shape[0], full_shape[1]*full_shape[2])
+        flat_out = rearrange(data, "frame wavelength output -> frame (wavelength output)")
+        wout = jp.einsum("f o i , f i -> f o", self.Ws, flat_out)
+        wout_full = wout.reshape((full_shape))
+        return wout_full
+
+
 class DN_KCOV(zdx.Base):
     kcov: jp.ndarray
     unit: units.Unit
@@ -141,6 +247,10 @@ class DN_KMAT(zdx.Base):
     def __init__(self, ni_kmat: io.oifits.NI_KMAT):
         self.K = jp.asarray(ni_kmat.K, dtype=float)
 
+class DN_DSAMP(zdx.Base):
+    D: jp.ndarray
+    def __init__(self, ni_dsamp: io.oifits.NI_DSAMP):
+        self.D = jp.asarray(ni_dsamp.D, dtype=float)
 
 
 
@@ -153,13 +263,14 @@ class DN_MOD(zdx.Base):
     fov_index: jp.ndarray
 
     def __init__(self, ni_mod: io.oifits.NI_MOD):
-        self.time = jp.asarray(ni_mod.data_table["TIME"].data, dtype=float)
+        self.time = jp.asarray(ni_mod.data_table["TIME"].data,
+                                            dtype=float)
         self.int_time = jp.asarray(ni_mod.int_time, dtype=float)
         self.mod_phas = DN_CPX(ni_mod.all_phasors)
         self.app_xy = jp.asarray(ni_mod.appxy, dtype=float)
         self.arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
         self.fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
-                                                            dtype=int)
+                                            dtype=int)
     @property
     def appxy(self):
         return self.app_xy
@@ -416,6 +527,9 @@ class DN_PointCollection(object):
     def coords_rad(self):
         return (mas2rad*self.aa, mas2rad*self.bb)
 
+    def coords_rad_single(self, index):
+        return (mas2rad*self.aa[index], mas2rad*self.bb[index])
+
     @property
     def coords_radial(self):
         """
@@ -457,7 +571,8 @@ class DN_PointCollection(object):
 
     def plot_frame(self, z=None, frame_index=0, wl_index=0,
                         out_index=0, mycmap=None, marksize_increase=1.0,
-                        colorbar=True, xlabel=True, title=True):
+                        colorbar=True, xlabel=True, title=True,
+                        whitened=False):
         """
             A convenience method to plot values of the point collection
         spatially.
@@ -472,16 +587,21 @@ class DN_PointCollection(object):
             colorbar : 
             xlabel : 
             title :
+            whitened : if True, then out_index is used and wl_index is moot.
             
         """
         import matplotlib.pyplot as plt
         marksize = marksize_increase * 50000/self.shape[0]
+        if whitened:
+            zframe = z[frame_index, out_index, :]
+        else:
+            zframe = z[frame_index,wl_index,out_index,:]
         if len(self.orig_shape) == 1:
-            plt.scatter(*self.coords, c=z[frame_index,wl_index,out_index,:],
+            plt.scatter(*self.coords, c=zframe,
                     cmap=mycmap, s=marksize)
             plt.gca().set_aspect("equal")
         else:
-            plt.imshow(z[frame_index,wl_index,out_index,:].reshape((self.orig_shape)),
+            plt.imshow(zframe.reshape((self.orig_shape)),
                 cmap=mycmap, extent=self.extent)
             plt.gca().set_aspect("equal")
             
@@ -514,16 +634,22 @@ class DN_NIFITS(zdx.Base):
     dn_iout: DN_IOUT
     dn_kiout: DN_KIOUT
     dn_kcov: DN_KCOV
+    dn_dsamp: DN_DSAMP
+    dn_iotags: DN_IOTAGS
+    dn_oswavelength: DN_OSWAVELENGTH
     def __init__(self,
                 dn_catm: DN_CATM = None,
                 dn_fov: DN_FOV_TYPE = None,
                 dn_kmat: DN_KMAT = None,
                 dn_wavelength: DN_WAVELENGTH = None,
+                dn_oswavelength: DN_OSWAVELENGTH = None,
                 dn_target: DN_TARGET = None,
                 dn_mod: DN_MOD = None,
                 dn_iout: DN_IOUT = None,
                 dn_kiout: DN_KIOUT = None,
-                dn_kcov: DN_KCOV = None):
+                dn_kcov: DN_KCOV = None,
+                dn_dsamp: DN_DSAMP = None,
+                dn_iotags: DN_IOTAGS = None):
         
         self.dn_catm = dn_catm
         self.dn_fov = dn_fov
@@ -534,6 +660,9 @@ class DN_NIFITS(zdx.Base):
         self.dn_iout = dn_iout
         self.dn_kiout = dn_kiout
         self.dn_kcov = dn_kcov
+        self.dn_dsamp = dn_dsamp
+        self.dn_iotags = dn_iotags
+        self.dn_oswavelength = dn_oswavelength
         # self.fov_function = self.dn_fov.fov_function
 
     @classmethod
@@ -766,6 +895,8 @@ class SourceList(zdx.Base):
             raise AttributeError(f"{key} not in {self.sources.keys()}")
 
 
+        
+
 class DN_ErrorPhasorPistonPointing(zdx.Base):
     """
         A class to define error realisations in the form
@@ -800,6 +931,14 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
         phase = self.piston[:,None,:] * 2 * jp.pi / lambs[None,:,None]
         return amp[:,:,:] * jp.exp(1j * phase)
 
+    def single_phasor(self, lambs, index):
+        """
+        """
+        amp = (1 - self.fourDsquare / lambs[:,None]**2
+                        * self.pointing[None,:]**2)
+        phase = self.piston[None,:] * 2 * jp.pi / lambs[:,None]
+        return amp[:,:] * jp.exp(1j * phase)
+
     @classmethod
     def no_error(cls, mydn):
         """
@@ -817,6 +956,58 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
         D = mydn.dn_fov.D
         myobj = cls(piston=piston, pointing=pointing, D=D)
         return myobj
+
+class DN_ErrorBankDouble(DN_ErrorPhasorPistonPointing):
+    """
+        Use this for differentiable samples of realizations of
+    instrumental errors.
+
+    Applications:
+        * Numerical/empirical evaluation (differentiable) of the covariance
+          within one frame using single_variation_phasor, which produces
+          many scaled realizations of the error phasor *instead* of a time
+          series.
+
+    For second order approximation of the covariance, use the Jac. and Hes.
+    over a single ``DN_ErrorPhasorPistonPointing``
+    """
+    pistons : jp.ndarray
+    pointings : jp.ndarray
+    pistonscale : jp.ndarray
+    pointingscale : jp.ndarray
+    
+    def __init__(self, pistons, pointings):
+        self.values = values
+        
+
+    @classmethod
+    def gaussian_from_seed(cls, shape=None, seed=None, rng=None, verbose=True):
+        if rng is None:
+            print("No rng, using seed.")
+            if seed is None:
+                print("No seed, using default value")
+                seed = 10
+            else:
+                rng = np.random.default_rng(np.random.SeedSequence(self.seed))
+        else :
+            print("Using inherited rng")
+        vals_
+
+    @property
+    def scaled_pistons(self):
+        return (self.pistons[:,:] - self.piston[:,:]) * self.pistonscale[None,:] + self.piston[:,:]
+    @property
+    def scaled_pointings(self):
+        return (self.pointings[:,:] - self.pointing[:,:]) * self.pointingscale[None,:] + self.pointing[:,:]
+    
+    def single_variation_phasor(self, lambs, index):
+        pistons = self.scaled_pistons
+        pointings = self.scaled_pointings
+        amp = (1 - self.fourDsquare / lambs[None,:,None]**2
+                        * self.pointings[:,None,:]**2)
+        phase = self.pistons[:,None,:] * 2 * jp.pi / lambs[None,:,None]
+        phasor_variants = amp[:,:,:] * jp.exp(1j * phase)
+        
 
 
 DN_ErrorPhasorType = Union[DN_ErrorPhasorPistonPointing, ]
@@ -864,6 +1055,36 @@ class DN_Observation(zdx.Base):
         bs = jp.concatenate(allbs, axis=-1)
         return b.transpose((1,0,2,3))
 
+    def single_geometric_phasor(self, sourcelist, index):
+        """
+        Returns the complex phasor corresponding to the locations
+        of the family of sources
+        
+        **Parameters:**
+        
+        * ``alpha``         : (n_frames, n_points) The coordinate matched to X in the array geometry
+        * ``beta``          : (n_frames, n_points) The coordinate matched to Y in the array geometry
+        * ``anarray``       : The array geometry (n_input, 2)
+        * ``include_mod``   : Include the modulation phasor
+        
+        **Returns** : A vector of complex phasors
+
+        """
+        allbs = []
+        for asource in sourcelist:
+            alphas, betas = asource.locs.coords_rad_single(index)
+            ds_mas2 = asource.locs.ds_mas2
+            xy_array = jp.array(self.dn_nifits.dn_mod.appxy[index])
+            lambs = jp.array(self.dn_nifits.dn_wavelength.lambs)
+            k = 2*jp.pi/lambs
+            a = jp.array((alphas, betas), dtype=jp.float32)
+            phi = k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:,:], a[:,:])
+            b = jp.exp(1j*phi)[None,:,:]
+            allbs.append(b)
+        bs = jp.concatenate(allbs, axis=-1)
+        return b.transpose((1,0,2,3))
+
+
     def get_modulation_phasor(self):
         """
         Shape: [n_frames n_wavelengths n_inputs]
@@ -873,6 +1094,16 @@ class DN_Observation(zdx.Base):
         col_area = jp.array(self.dn_nifits.dn_mod.arrcol)
         err_phas = self.error_phasor.phasor(self.dn_nifits.dn_wavelength.lambs)
         mods = err_phas * raw_mods * jp.sqrt(col_area)[:,None,:]
+        return mods
+
+    def get_single_clean_modulation_phasor(self, index):
+        """
+        Shape: [1, n_wavelengths n_inputs]
+        
+        """
+        raw_mods = jp.array(self.dn_nifits.dn_mod.all_phasors[index])
+        col_area = jp.array(self.dn_nifits.dn_mod.arrcol[index])
+        mods = raw_mods * jp.sqrt(col_area)[None,:]
         return mods
 
     def fov_function_wrapper(self, sourcelist):
@@ -886,6 +1117,19 @@ class DN_Observation(zdx.Base):
             allgs.append(self.dn_nifits.dn_fov.fov_function(alpha,beta, wavelengths))
         gs = jp.concatenate(allgs, axis=-1)
         return gs
+
+    def single_fov_function_wrapper(self, sourcelist, index):
+        """
+        Shape: [1, n_wavelengths, n_locs]
+        """
+        wavelengths = self.dn_nifits.dn_wavelength.lambs
+        allgs = []
+        for asource in sourcelist:
+            alpha, beta = asource.locs.coords_rad_single(index)
+            allgs.append(self.dn_nifits.dn_fov.fov_function(alpha,beta, wavelengths))
+        gs = jp.concatenate(allgs, axis=-1)
+        # TODO: inefficient: ideally compute only the needed one.
+        return gs[index,:,:][None, :,:]
 
     def get_Is(self, xs):
         """
@@ -951,9 +1195,86 @@ class DN_Observation(zdx.Base):
         Is = self.get_Is(xs * x_inj[:,:,None,:] * x_mod[:,:,:,None])
         if kernels:
             KIs = self.get_KIs(Is)
-            return KIs
+            return self.downsample(KIs)
         else:
+            return self.downsample(Is)
+        
+    def get_total_outs(self, sourcelist, kernels=False):
+        """
+        Same as `get_all_outs` but sums the contribution of all sources.
+        """
+        z = self.get_all_outs(sourcelist, kernels=kernels)
+        return jp.sum(z, axis=-1)
+
+    def get_total_single_variations(self,sourcelist,
+                                index, 
+                                errorbank: DN_ErrorBankDouble,
+                                kernels=False):
+        """
+        Compute the transmission map for an array of coordinates. The map can be seen
+        as equivalent collecting power expressed in [m^2] for each point sampled so as
+        to facilitate comparison with models in Jansky multiplied by the exposure time
+        of each frame (available in `nifits.ni_mod.int_time`).
+
+        Args:
+            alphas  : ArrayLike [rad] 1D array of coordinates in right ascension
+            betas   : ArrayLike [rad] 1D array of coordinates in declination
+            kernels : (bool) if True, then computes the post-processed
+                  observables as per the KMAT matrix.
+
+        Returns:
+            if ``kernels`` is False: the *raw transmission output*.
+            if ``kernels`` is True: the *differential observable*.
+
+        .. hint:: **Shape:** (n_reals, n_wl, n_outputs, n_points)
+
+        """
+        # The phasor from the incidence on the array:
+        xi = self.single_geometric_phasor(sourcelist, index)
+        # print("xs", xs)
+        
+        # The phasor from the spatial filtering:
+        x_inj = self.single_fov_function_wrapper(sourcelist, index)
+
+        # print("x_inj", x_inj)
+        
+        # The phasor from the internal modulation
+        # x_mod = self.nifits.ni_mod.all_phasors
+        x_mod = self.get_single_modulation_phasor(index)
+        # print("x_mod", x_mod)
+
+        err_phas = errorbank.single_variation_phasor(self.dn_nifits.dn_wavelength.lambs)
+        
+        # this is actually a collecting area
+        Is = self.get_Is(xi * x_inj[:,:,None,:] * x_mod[:,:,:,None] * err_phas)
+        if kernels:
+            KIs = self.get_KIs(Is)
+            return jp.sum(self.downsample(KIs), axis=-1)
+        else:
+            return jp.sum(self.downsample(Is), axis=-1)
+
+
+    def downsample(self, Is):
+        """
+        Downsample flux from the NI_OSWAVELENGTH bins to
+        OI_WAVELENGTH bins.
+        Expected shape is : (n_frames, n_wl, n_outputs, n_points), the method
+        simply applies the ``NI_DSAMP`` matrix along the second axis (1).
+
+        Args:
+            Is     : ArrayLike [flux] input the result computed with the
+                     oversampled wavelength channels.
+                     (n_frames, n_wlold, n_outputs, n_points)
+
+        Returns:
+            Ids    : ArrayLike [flux] (n_frames, n_wlnew, n_outputs, n_points)
+
+        Returns
+        """
+        if (self.dn_nifits.dn_dsamp is None) or (self.dn_nifits.dn_oswavelength is None):
             return Is
+        Ids = jp.einsum("l w, t w o m -> t l o m", self.dn_nifits.dn_dsamp.D, Is )
+        return Ids
 
 
 class DN_Error_Estimation(DN_Observation):
@@ -962,13 +1283,295 @@ class DN_Error_Estimation(DN_Observation):
     """
     error_phasors: DN_CPX
     def __init__(self, *args, **kwargs):
-        super().__init__nit__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         n_collectors = self.dn_nifits.n_collectors
         self.error_phasors = DN_CPX.zeros(n_collectors)
 
     def aberrated_model(self):
         pass
 
+import types
+from types import ModuleType
+from jax.scipy.linalg import sqrtm
+
+
+class DN_Post(DN_Observation):
+    datashape: tuple
+    flatshape: tuple
+    fullyflatshape: tuple
+    Ws: jp.ndarray
+    W_unit : units.Unit
+    
+    
+    """
+    This variant of the backend class offers a statistically whitened alternate
+    forward model with directly whitened observables by calling ``w_`` prefixed
+    methods. (Ceau et al. 2019, Laugier et al. 2023)
+
+    After normal construction, use ``create_whitening_matrix()`` to update the
+    whitening matrix based on the ``NI_KCOV`` data.
+    
+    Use ``w_get_all_outs`` and ``get_moving_outs`` in the same way, but they
+    return whitened observables. Compare it to ``self.dn_nifits.ni_kiout.w_kiout``
+    instead of ``self.dn_nifits.ni_kiout.kiout``.
+
+    """
+
+    def __init__(self, dn_nifits, dn_nuisance, dn_interest,
+                        error_phasor):
+        self.dn_nifits = dn_nifits
+        self.nuisance = dn_nuisance
+        self.interest = dn_interest
+        # TODO This is named a phasor but it is actually a piston
+        self.error_phasor = error_phasor
+        self.create_whitening_matrix()
+        
+
+    def create_whitening_matrix(self,
+                            ):
+        """
+            Updates the whitening matrix:
+
+        Args:
+            md :  A numpy-like backend module.
+
+        The pile of whitening matrices is stored as ``self.dn_nifits.dn_kiout.Ws`` (one for
+        each frame).
+        """
+        # Assertion: assert
+        # assert hasattr(self.dn_nifits, "dn_kcov")
+        # if self.dn_nifits.dn_kcov.header["NIFITS SHAPE"] != "frame (wavelength output)":
+        #     raise NotImplementedError("Covariance shape expected: frame (wavelength output)")
+
+        Ws = []
+        for amat in self.dn_nifits.dn_kcov.kcov:
+            Ws.append(np.linalg.inv(sqrtm(amat)))
+        self.Ws = jp.array(Ws)
+        self.W_unit = self.dn_nifits.dn_kcov.unit**(-1/2)
+        if hasattr(self.dn_nifits, "dn_kiout"):
+            self.datashape = (self.dn_nifits.dn_kiout.shape) 
+        self.flatshape = (self.dn_nifits.dn_mod.mod_phas.shape[0], self.dn_nifits.dn_kcov.kcov.shape[1])
+        self.fullyflatshape = np.prod(self.flatshape)
+
+    def whiten_signal(self, signal):
+        """
+        Whitens a signal so that error covariance
+        is identity in the new axis.
+
+        Args:
+            signal: The direct signal to whiten (differential observable
+                a.k.a kernel-null)
+
+        Returns:
+            wout_full: the whitened signal ($\\mathbf{W}\\cdot \\mathbf{s}$)
+                in the new basis.
+
+        """
+        full_shape = signal.shape
+        # Flatten the spectral and output dimension
+        flat_full_shape = (*self.flatshape, full_shape[-1])
+        flat_out = rearrange(signal, "frame wavelength output source -> frame (wavelength output) source")
+        wout = jp.einsum("f o i , f i m -> f o m", self.Ws, flat_out)
+        return wout
+
+
+    def w_get_all_outs(self, *args, **kwargs):
+        """
+        """
+        output = self.get_all_outs(*args, **kwargs)
+        wout_full = self.whiten_signal(output)
+        return wout_full
+
+    def w_get_moving_outs(self, *args, **kwargs):
+        """
+        """
+        output = self.get_moving_outs(*args, **kwargs)
+        wout_full = self.whiten_signal(output)
+        return wout_full
+
+    def add_blackbody(self, temperature):
+        """
+            Initializes the blackbody for a given temperature
+        Args:
+            temperature: units.Quantity
+        """
+        self.bb = BB(temperature)
+
+    def get_pfa_Te(self, signal=None,
+                        md=np):
+        """
+            Compute the Pfa for the energy detector test.
+        Args:
+            signal: The raw signal (non-whitened)
+
+        Returns:
+            pfa the false alarm probability (p-value) associated
+                to the given signal.
+        """
+        w_signal = self.whiten_signal(signal)
+        wf_signal = md.flatten(w_signal)
+        pfa = 1 - ncx2.cdf(wf_signal, df=self.fullyflatshape, nc=0.)
+        return pfa
+
+    def get_pfa_Tnp(self, alphas, betas,
+                    signal=None,
+                    model_signal=None,
+                        md=np):
+        """
+            Compute the Pfa for the Neyman-Pearson test.
+        """
+        pass
+
+
+    def get_blackbody_native(self, ):
+        """
+        Returns:
+            blackbody_spectrum: in units consistent with the native
+                units of the file $[a.sr^{-1}.m^{-2}]$ (where [a] is typically [ph/s]).
+        """
+        # Typically given there in erg/Hz/s/sr/cm^2
+        myspectral_density = self.bb(self.dn_nifits.oi_wavelength.lambs * units.m)
+        # Photon_energies in J/ph
+        photon_energies = (self.dn_nifits.oi_wavelength.lambs*units.m).to(
+                            units.J, equivalencies=units.equivalencies.spectral())\
+                                / units.photon
+        dnus = self.dn_nifits.oi_wavelength.dnus * (units.Hz)
+        print((myspectral_density * dnus / photon_energies).unit)
+        blackbody_spectrum = (myspectral_density * dnus / photon_energies).to(
+                                 self.dn_nifits.ni_iout.unit / units.sr / (units.m**2))
+        return blackbody_spectrum
+
+
+    def get_blackbody_collected(self, alphas, betas,
+                        kernels=True, whiten=True,
+                            to_si=True):
+        """
+            Obtain the output spectra of a blackbody at the given blackbody temperature
+        Args:
+            alphas: ArrayLike: Relative position in rad
+            betas:  ArrayLike: Relative position in rad
+            kernels: Bool (True) Whether to work in the kernel postprocessing space
+                (False is not implemented yet)
+            whiten: Bool (True) whether to use whitening post-processing (False
+                is not implemented yet)
+            to_si: Bool (True) convert to SI units
+        """
+        collecting_map_q = units.m**2 * self.get_all_outs(alphas, betas, kernels=kernels)
+        blackbody_spectrum = self.get_blackbody_native()
+        collected_flux = blackbody_spectrum[None,:,None,None] \
+                                * collecting_map_q[:,:,:,:]
+        if whiten:
+            blackbody_signal = self.W_unit * self.whiten_signal(collected_flux)
+        else:
+            blackbody_signal = collected_flux
+        # collected_flux is in equivalent W / rad^2 
+        # That is a power per solid angle of source
+        
+        if to_si:
+            return blackbody_signal.to(blackbody_signal.unit.to_system(units.si)[0])
+        else:
+            return blackbody_signal
+
+    def get_Te(self):
+        """
+            Computes the Te test statistic of the current file. This test statistic
+        is supposed to be distributed as a chi^2 under H_0.
+        Returns:
+            Te : x.T.dot(x) where x is the whitened signal.
+        """
+        if hasattr(self.dn_nifits, "ni_kiout"):
+            kappa = self.whiten_signal(self.dn_nifits.ni_kiout.kiout)
+        else:
+            raise NotImplementedError("Needs a NI_KIOUT extension")
+        x = kappa.flatten()
+        return x.T.dot(x)
+
+    def get_pdet_te(self, alphas, betas,
+                    solid_angle,
+                    kernels=True, pfa=0.046,
+                    whiten=True,
+                    temperature=None):
+        """
+        pfa:
+        * 1 sigma: 0.32
+        * 2 sigma: 0.046
+        * 3 sigma: 0.0027
+        """
+        if temperature is not None:
+            self.add_blackbody(temperature)
+        ref_spectrum = solid_angle * self.get_blackbody_collected(alphas, betas,
+                                                    kernels=kernels,
+                                                    whiten=True,
+                                                    to_si=True)
+        print(ref_spectrum.unit)
+        threshold = ncx2.ppf(1-pfa, df=self.fullyflatshape, nc=0.)
+        x = ref_spectrum.reshape(-1, 1000)
+        xTx = np.einsum("o m , o m -> m", x, x)
+        pdet_Pfa = 1 - ncx2.cdf(threshold, self.fullyflatshape, xTx)
+        return pdet_Pfa
+
+    def get_sensitivity_te(self, alphas, betas,
+                    kernels=True,
+                    temperature=None, pfa=0.046, pdet=0.90,
+                    distance=None, radius_unit=units.Rjup,
+                    md=np):
+        """
+        .. code-block:: python
+
+            from scipy.stats import ncx2
+            xs = np.linspace(-10, 10, 100)
+            ys = np.linspace(1e-6, 0.999, 100)
+            u = 1 - ncx2.cdf(xs, df=10, nc=0)
+            v = ncx2.ppf(1 - ys, df=10, nc=0)
+
+            plt.figure()
+            plt.plot(xs, u)
+            plt.show()
+
+            plt.figure()
+            plt.plot(ys, v)
+            plt.plot(u, xs)
+            plt.show()
+        """
+        from scipy.optimize import leastsq
+        if temperature is not None:
+            self.add_blackbody(temperature)
+        ref_spectrum = self.get_blackbody_collected(alphas=alphas,betas=betas,
+                                                    kernels=kernels, whiten=True,
+                                                    to_si=True)
+        print("Ref spectrum unit: ", ref_spectrum.unit)
+        threshold = ncx2.ppf(1-pfa, df=self.fullyflatshape, nc=0.)
+        x = (ref_spectrum).reshape((-1, ref_spectrum.shape[-1]))
+        print("Ref signal (x) unit: ", x.unit)
+        print("Ref signal (x) shape: ", x.shape)
+        xtx = md.einsum("m i, i m -> m", x.T, x)
+        lambda0 = 1.0e-3 * self.fullyflatshape
+        # The solution lambda is the x^T.x value satisfying Pdet and Pfa
+        sol = leastsq(residual_pdet_Te, lambda0, 
+                        args=(threshold, self.fullyflatshape, pdet))# AKA lambda
+        lamb = sol[0][0]
+        # Concatenate the wavelengths
+        lim_solid_angle = np.sqrt(lamb) / np.sqrt(xtx)
+        if distance is None:
+            return lim_solid_angle
+        elif isinstance(distance, units.Quantity):
+            dist_converted = distance.to(radius_unit)
+            lim_radius = 2*dist_converted*md.sqrt(lim_solid_angle/md.pi)
+            return lim_radius.to(radius_unit, equivalencies=units.equivalencies.dimensionless_angles())
+
+    def get_pdet_tnp(self, transmission_map, pfa=0.046, pdet=0.90):
+        pass
+    
+    def get_sensitivity_tnp(self, transmission_map, pfa=0.046, pdet=0.90):
+        pass
+
+    def evalutate_single_covariance(self, sourcelist, index, kernels=True):
+        errorbank = self.error_phasor
+        if not isinstance(self.error_phasor, DN_ErrorBankDouble):
+            raise NotImplementedError
+        outs = self.get_total_single_variations(sourcelist, index,
+                                            errorbank=self.error_phasor,
+                                            kernels=kernels)
 
 """
 TODO:
@@ -978,17 +1581,23 @@ TODO:
 
 TODO: propagation of light
 ## Objectives:
-### Covariance matrix estimation:
+### Covariance matrix estimation using second order:
 Needs
-* Extended nuisance star
+* Extended nuisance star DONE
 * No planet
-* Additional input noises! TODO
+* Additional input noises! WIP
 * Single frame propagation? TODO
+
+### Continuous MC covariance estimation
+Use: ``DN_ErrorBankDouble``
+* Create a new class to host the calculations
+* 
+
 
 ### Blackbody retrieval
 Needs
-* Extended nuisance star
-* One planet
+* Extended nuisance star DONE
+* One planet DONE
 * No additional noises
 * Whitening TODO
 
