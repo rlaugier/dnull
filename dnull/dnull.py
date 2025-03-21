@@ -105,7 +105,7 @@ class DN_WAVELENGTH(zdx.Base):
     @property
     def dnus(self):
         assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return cst.c.value/self.dlambs
+        return jp.gradient(cst.c.value/self.dlambs)
 
 class DN_IOTAGS(zdx.Base):
     outbright: jp.ndarray
@@ -191,7 +191,7 @@ class DN_OSWAVELENGTH(zdx.Base):
     @property
     def dnus(self):
         assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return cst.c.value/self.dlambs
+        return jp.abs(jp.gradient(cst.c.value/self.lambs))
 
 DN_TARGET = io.oifits.OI_TARGET
 
