@@ -961,7 +961,71 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
         myobj = cls(piston=piston, pointing=pointing, D=D)
         return myobj
 
-class DN_ErrorBankDouble(DN_ErrorPhasorPistonPointing):
+class DN_NOTT_LDC(zdx.Base):
+    """
+        Holds the *controlable* parameters of the NOTT LDC
+    `xx_eq_index` holds the equivalent index of the materials for which lengths are stated.
+    * `co2` : air-displacing length (1-n)
+    * `glass` : air-displacing length
+    * `air` : ambient air length
+    """
+    piston : jp.array
+    co2_ppm : jp.float32
+    co2_length : jp.array
+    glass_length : jp.array
+    co2_eq_index : jp.array
+    air_eq_index : jp.array
+    glass_eq_index : jp.array
+
+    def __init__(self, piston, co2_ppm,
+                    co2_length, glass_length,
+                    temp, pres, rhum, co2, filet_path, lambs):
+        self.piston = piston
+        self.co2_ppm = co2_ppm
+        self.co2_length = co2_length
+        self.glass_length = glass_length
+        from scifysim.n_air import wet_atmo
+        from scifysim.correctors import corrector
+        lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
+        lab_co2 = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
+        lab_air = corrector(temp=temp, pres=pres, rhum=rhum, co2=co2)
+        self.co2_eq_index = lab_co2.get_Nair(lambs, add=0.)
+        self.air_eq_index = lab_air.get_Nair(lambs, add=1.)
+        self.glass_eq_index = load_txt_index(lambs,add=0)
+
+    def phase(self, lambs):
+        phase = 2*jp.pi/lambs[:,None] * (self.piston[None,:] * self.air_eq_index[:,None] \
+                                    + self.co2_length[None,:] * self.co2_eq_index[:,None] \
+                                    + self.gla_length[None,:] * self.glass_eq_index[:,None])
+        return phase
+
+    def amplitude(self, lambs):
+        return jp.ones_like(lambs)
+
+    def phasor(self, lambs):
+        return self.amplitude(lambs) * jp.exp(1j*self.phase(lambs))
+        
+def load_txt_index(lambs, file_path, order=3):
+    import scipy.interpolate as interp
+    nplate_file = np.loadtxt(file_path, delimiter=";")
+    nplate_int = interp.interp1d(nplate_file[:,0]*1e-6, nplate_file[:,1],
+                                 kind=order, bounds_error=False )
+    nplate = nplate_int(lambs)
+    return nplate
+    
+    
+class DN_NOTT_LDC_series(zdx.Base):
+    locseries : list[DN_NOTT_LDC]
+
+    def __init__(self, locseries, offset):
+        self.locseries = locseries
+        self.offset = offset
+
+    @property
+    def offset(self):
+        return self.locseries[0]
+
+class DN_ErrorBankDouble(zdx.Base):
     """
         Use this for differentiable samples of realizations of
     instrumental errors.
