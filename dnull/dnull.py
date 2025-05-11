@@ -25,6 +25,8 @@ import numpy as np
 from astropy import units, constants as cst
 from einops import rearrange
 
+from scipy.stats import ncx2
+
 import sys
 def getclass(classname):
     return getattr(sys.modules[__name__], classname)
@@ -293,6 +295,7 @@ class DN_MOD(zdx.Base):
         raise NotImplementedError(self.dateobs)
         return None
 
+
     
 
 class DN_FOV(object):
@@ -528,7 +531,7 @@ class DN_PointCollection(object):
         return (mas2rad*self.aa, mas2rad*self.bb)
 
     def coords_rad_single(self, index):
-        return (mas2rad*self.aa[index], mas2rad*self.bb[index])
+        return (mas2rad*self.aa, mas2rad*self.bb)
 
     @property
     def coords_radial(self):
@@ -874,6 +877,7 @@ DN_Source = Union[DN_Source_Spectrum]
 
 class SourceList(zdx.Base):
     """
+    (unsused)
     Basic class for modelling a set of light
     sources.
     """
@@ -975,39 +979,64 @@ class DN_ErrorBankDouble(DN_ErrorPhasorPistonPointing):
     pointings : jp.ndarray
     pistonscale : jp.ndarray
     pointingscale : jp.ndarray
+    fourDsquare : jp.float32
     
-    def __init__(self, pistons, pointings):
-        self.values = values
+    def __init__(self, pistons, pointings, pistonscale, pointingscale, fourDsquare):
+        self.pistons = jp.asarray(pistons)
+        self.pointings = jp.asarray(pointings)
+        self.pistonscale = jp.asarray(pistonscale)
+        self.pointingscale = jp.asarray(pointingscale)
+        self.fourDsquare = jp.asarray(fourDsquare)
         
 
     @classmethod
-    def gaussian_from_seed(cls, shape=None, seed=None, rng=None, verbose=True):
+    def gaussian_from_seed(cls, D=None,
+                        shape=None, seed=None, rng=None,
+                        verbose=True, pistonscale=1., pointingscale=1.):
         if rng is None:
             print("No rng, using seed.")
             if seed is None:
                 print("No seed, using default value")
                 seed = 10
             else:
-                rng = np.random.default_rng(np.random.SeedSequence(self.seed))
+                rng = np.random.default_rng(np.random.SeedSequence(seed))
         else :
             print("Using inherited rng")
-        vals_
+        if not (isinstance(pistonscale, jp.ndarray) or isinstance(pistonscale, np.ndarray)):
+            pistonscale = pistonscale * jp.ones(shape[1])
+        if not (isinstance(pointingscale, jp.ndarray) or isinstance(pointingscale, np.ndarray)):
+            pointingscale = pointingscale * jp.ones(shape[1])
+        vals_piston = np.random.normal(size=shape)
+        vals_pointings = np.random.normal(size=shape)
+
+        obj = cls(vals_piston, vals_pointings, pistonscale, pointingscale, 4*D**2)
+        return obj
+
 
     @property
     def scaled_pistons(self):
-        return (self.pistons[:,:] - self.piston[:,:]) * self.pistonscale[None,:] + self.piston[:,:]
+        return (self.pistons[:,:] * self.pistonscale[None,:])
     @property
     def scaled_pointings(self):
-        return (self.pointings[:,:] - self.pointing[:,:]) * self.pointingscale[None,:] + self.pointing[:,:]
+        return (self.pointings[:,:] * self.pointingscale[None,:])
     
-    def single_variation_phasor(self, lambs, index):
+    def variation_phasor(self, lambs, index):
         pistons = self.scaled_pistons
         pointings = self.scaled_pointings
         amp = (1 - self.fourDsquare / lambs[None,:,None]**2
                         * self.pointings[:,None,:]**2)
         phase = self.pistons[:,None,:] * 2 * jp.pi / lambs[None,:,None]
         phasor_variants = amp[:,:,:] * jp.exp(1j * phase)
-        
+        return phasor_variants
+    
+    def single_variation_phasor(self, lambs, index):
+        pistons = self.scaled_pistons
+        pointings = self.scaled_pointings
+        amp = (1 - self.fourDsquare / lambs[:,None]**2
+                        * pointings[index,None,:]**2)
+        phase = pistons[index,None,:] * 2 * jp.pi / lambs[:,None]
+        phasor_variants = amp * jp.exp(1j * phase)
+        return phasor_variants[None,:,:]
 
 
 DN_ErrorPhasorType = Union[DN_ErrorPhasorPistonPointing, ]
@@ -1053,7 +1082,7 @@ class DN_Observation(zdx.Base):
             b = jp.exp(1j*phi)
             allbs.append(b)
         bs = jp.concatenate(allbs, axis=-1)
-        return b.transpose((1,0,2,3))
+        return bs.transpose((1,0,2,3))
 
     def single_geometric_phasor(self, sourcelist, index):
         """
@@ -1078,11 +1107,11 @@ class DN_Observation(zdx.Base):
             lambs = jp.array(self.dn_nifits.dn_wavelength.lambs)
             k = 2*jp.pi/lambs
             a = jp.array((alphas, betas), dtype=jp.float32)
-            phi = k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:,:], a[:,:])
-            b = jp.exp(1j*phi)[None,:,:]
+            phi = k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:], a[:,:])
+            b = jp.exp(1j*phi)
             allbs.append(b)
         bs = jp.concatenate(allbs, axis=-1)
-        return b.transpose((1,0,2,3))
+        return bs.transpose((1,0,2,3))
 
 
     def get_modulation_phasor(self):
@@ -1104,7 +1133,7 @@ class DN_Observation(zdx.Base):
         raw_mods = jp.array(self.dn_nifits.dn_mod.all_phasors[index])
         col_area = jp.array(self.dn_nifits.dn_mod.arrcol[index])
         mods = raw_mods * jp.sqrt(col_area)[None,:]
-        return mods
+        return mods[None,:,:]
 
     def fov_function_wrapper(self, sourcelist):
         """
@@ -1192,7 +1221,8 @@ class DN_Observation(zdx.Base):
         # print("x_mod", x_mod)
         
         # this is actually a collecting area
-        Is = self.get_Is(xs * x_inj[:,:,None,:] * x_mod[:,:,:,None])
+        Es = xs * x_inj[:,:,None,:] * x_mod[:,:,:,None]
+        Is = self.get_Is(Es)
         if kernels:
             KIs = self.get_KIs(Is)
             return self.downsample(KIs)
@@ -1206,7 +1236,7 @@ class DN_Observation(zdx.Base):
         z = self.get_all_outs(sourcelist, kernels=kernels)
         return jp.sum(z, axis=-1)
 
-    def get_total_single_variations(self,sourcelist,
+    def get_total_single_variations(self, sourcelist,
                                 index, 
                                 errorbank: DN_ErrorBankDouble,
                                 kernels=False):
@@ -1240,13 +1270,14 @@ class DN_Observation(zdx.Base):
         
         # The phasor from the internal modulation
         # x_mod = self.nifits.ni_mod.all_phasors
-        x_mod = self.get_single_modulation_phasor(index)
+        x_mod = self.get_single_clean_modulation_phasor(index)
         # print("x_mod", x_mod)
 
-        err_phas = errorbank.single_variation_phasor(self.dn_nifits.dn_wavelength.lambs)
+        err_phas = errorbank.single_variation_phasor(self.dn_nifits.dn_wavelength.lambs, index)
         
         # this is actually a collecting area
-        Is = self.get_Is(xi * x_inj[:,:,None,:] * x_mod[:,:,:,None] * err_phas)
+        print("xi", xi.shape,"x_inj",(x_inj.shape),"x_mod",x_mod.shape,"err_phas",err_phas.shape)
+        Is = self.get_Is(xi * x_inj[:,:,None,:] * x_mod[:,:,:,None] * err_phas[:,:,:,None])
         if kernels:
             KIs = self.get_KIs(Is)
             return jp.sum(self.downsample(KIs), axis=-1)
@@ -1556,14 +1587,96 @@ class DN_Post(DN_Observation):
             return lim_solid_angle
         elif isinstance(distance, units.Quantity):
             dist_converted = distance.to(radius_unit)
-            lim_radius = 2*dist_converted*md.sqrt(lim_solid_angle/md.pi)
+            lim_radius = dist_converted*md.sqrt(lim_solid_angle/md.pi)
             return lim_radius.to(radius_unit, equivalencies=units.equivalencies.dimensionless_angles())
 
-    def get_pdet_tnp(self, transmission_map, pfa=0.046, pdet=0.90):
-        pass
-    
-    def get_sensitivity_tnp(self, transmission_map, pfa=0.046, pdet=0.90):
-        pass
+    def get_Te(self):
+        """
+            Computes the Te test statistic of the current file. This test statistic
+        is supposed to be distributed as a chi^2 under H_0.
+        Returns:
+            Te : x.T.dot(x) where x is the whitened signal.
+        """
+        if hasattr(self.dn_nifits, "ni_kiout"):
+            kappa = self.whiten_signal(self.dn_nifits.ni_kiout.kiout)
+        else:
+            raise NotImplementedError("Needs a NI_KIOUT extension")
+        x = kappa.flatten()
+        return x.T.dot(x)
+
+    def get_pdet_te(self, alphas, betas,
+                    solid_angle,
+                    kernels=True, pfa=0.046,
+                    whiten=True,
+                    temperature=None):
+        """
+        pfa:
+        * 1 sigma: 0.32
+        * 2 sigma: 0.046
+        * 3 sigma: 0.0027
+        """
+        if temperature is not None:
+            self.add_blackbody(temperature)
+        ref_spectrum = solid_angle * self.get_blackbody_collected(alphas, betas,
+                                                    kernels=kernels,
+                                                    whiten=True,
+                                                    to_si=True)
+        print(ref_spectrum.unit)
+        threshold = ncx2.ppf(1-pfa, df=self.fullyflatshape, nc=0.)
+        x = ref_spectrum.reshape(-1, 1000)
+        xTx = np.einsum("o m , o m -> m", x, x)
+        pdet_Pfa = 1 - ncx2.cdf(threshold, self.fullyflatshape, xTx)
+        return pdet_Pfa
+
+    def get_sensitivity_te(self, alphas, betas,
+                    kernels=True,
+                    temperature=None, pfa=0.046, pdet=0.90,
+                    distance=None, radius_unit=units.Rjup,
+                    md=np):
+        """
+        .. code-block:: python
+
+            from scipy.stats import ncx2
+            xs = np.linspace(-10, 10, 100)
+            ys = np.linspace(1e-6, 0.999, 100)
+            u = 1 - ncx2.cdf(xs, df=10, nc=0)
+            v = ncx2.ppf(1 - ys, df=10, nc=0)
+
+            plt.figure()
+            plt.plot(xs, u)
+            plt.show()
+
+            plt.figure()
+            plt.plot(ys, v)
+            plt.plot(u, xs)
+            plt.show()
+        """
+        from scipy.optimize import leastsq
+        if temperature is not None:
+            self.add_blackbody(temperature)
+        ref_spectrum = self.get_blackbody_collected(alphas=alphas,betas=betas,
+                                                    kernels=kernels, whiten=True,
+                                                    to_si=True)
+        print("Ref spectrum unit: ", ref_spectrum.unit)
+        threshold = ncx2.ppf(1-pfa, df=self.fullyflatshape, nc=0.)
+        x = (ref_spectrum).reshape((-1, ref_spectrum.shape[-1]))
+        print("Ref signal (x) unit: ", x.unit)
+        print("Ref signal (x) shape: ", x.shape)
+        xtx = md.einsum("m i, i m -> m", x.T, x)
+        lambda0 = 1.0e-3 * self.fullyflatshape
+        # The solution lambda is the x^T.x value satisfying Pdet and Pfa
+        sol = leastsq(residual_pdet_Te, lambda0, 
+                        args=(threshold, self.fullyflatshape, pdet))# AKA lambda
+        lamb = sol[0][0]
+        # Concatenate the wavelengths
+        lim_solid_angle = np.sqrt(lamb) / np.sqrt(xtx)
+        if distance is None:
+            return lim_solid_angle
+        elif isinstance(distance, units.Quantity):
+            dist_converted = distance.to(radius_unit)
+            lim_radius = dist_converted*md.sqrt(lim_solid_angle/md.pi)
+            return lim_radius.to(radius_unit, equivalencies=units.equivalencies.dimensionless_angles())
+
 
     def evalutate_single_covariance(self, sourcelist, index, kernels=True):
         errorbank = self.error_phasor
@@ -1577,6 +1690,16 @@ class DN_Post(DN_Observation):
 TODO:
 * The blackbody object can work with arrays: use that
 * The wavelength is passed as extra parameter from the trunk object
+
+TODO: Null optimization
+* Calibration of the LDC -> projection onto instrument modes (Vacuum, Air, CO2, Glass)
+* On-sky tracking -> 1 DoF
+* On-sky transverse dispersion tracker
+* On-sky recalibration
+* Instrument matrix evaluation
+    - With uncalibrated LDC
+    - With calibrated LDC
+
 
 
 TODO: propagation of light
