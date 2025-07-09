@@ -201,10 +201,18 @@ class DN_IOUT(zdx.Base):
     iout: jp.ndarray
     unit: units.Unit
 
-    def __init__(self, ni_iout: io.oifits.NI_IOUT):
-        self.iout = jp.asarray(ni_iout.iout, dtype=float)
-        self.unit = ni_iout.unit
-
+    def __init__(self, ni_iout: io.oifits.NI_IOUT,
+                    iout=None,
+                    unit=None):
+        if iout is None:
+            self.iout = jp.asarray(ni_iout.iout, dtype=float)
+        else:
+            self.iout = iout
+        if units is None:
+            self.unit = ni_iout.unit
+        else:
+            self.unit = unit
+from astropy.io.fits import Header
 class DN_CATM(zdx.Base):
     M: DN_CPX
     def __init__(self, ni_catm: io.oifits.NI_CATM):
@@ -254,6 +262,13 @@ class DN_DSAMP(zdx.Base):
     def __init__(self, ni_dsamp: io.oifits.NI_DSAMP):
         self.D = jp.asarray(ni_dsamp.D, dtype=float)
 
+class DN_ARRAY(zdx.Base):
+    """
+        Temporary, not use
+    """
+    D: jp.ndarray
+    def __init__(self, ni_dsamp: io.oifits.OI_ARRAY):
+        self.D = jp.asarray(ni_dsamp.D, dtype=float)
 
 
 class DN_MOD(zdx.Base):
@@ -264,15 +279,52 @@ class DN_MOD(zdx.Base):
     arrcol: jp.ndarray
     fov_index: jp.ndarray
 
-    def __init__(self, ni_mod: io.oifits.NI_MOD):
-        self.time = jp.asarray(ni_mod.data_table["TIME"].data,
+    def __init__(self, ni_mod: io.oifits.NI_MOD=None,
+                        time=None,
+                        int_time=None,
+                        mod_phas=None,
+                        app_xy=None,
+                        arrcol=None,
+                        fov_index=None,
+                        clip_length=None):            
+        if time is None:
+            self.time = jp.asarray(ni_mod.data_table["TIME"].data,
                                             dtype=float)
-        self.int_time = jp.asarray(ni_mod.int_time, dtype=float)
-        self.mod_phas = DN_CPX(ni_mod.all_phasors)
-        self.app_xy = jp.asarray(ni_mod.appxy, dtype=float)
-        self.arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
-        self.fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
+        else:
+            self.time = time
+        if int_time is None:
+            self.int_time = jp.asarray(ni_mod.int_time, dtype=float)
+        else:
+            self.int_time = int_time
+        if mod_phas is None:
+            self.mod_phas = DN_CPX(ni_mod.all_phasors)
+        else:
+            self.mod_phas = mod_phas
+        if app_xy is None:
+            self.app_xy = jp.asarray(ni_mod.appxy, dtype=float)
+        else:
+            self.app_xy = app_xy
+        if arrcol is None:
+            self.arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
+        else:
+            self.arrcol = arrcol
+        if fov_index is None:
+            self.fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
                                             dtype=int)
+        else:
+            self.fov_index = fov_index
+
+        
+
+    # @classmethodssmethod
+    # def from_same(cls, dn_mod: DN_MOD=None):
+    #     cls(time=,
+    #         int_time=,
+    #         mod_phase=,
+    #         app_xy=,
+    #         )
+        
+    
     @property
     def appxy(self):
         return self.app_xy
@@ -306,7 +358,8 @@ class DN_FOV(object):
 
         At this point, it can only work with the `diameter_gaussian_radial` mode.
         """
-        assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
+        if isinstance(ni_fov, io.oifits.NI_FOV):
+            assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
         self = DN_FOV_diam_gau_rad(ni_fov)
 
@@ -317,6 +370,8 @@ class DN_FOV(object):
 
         At this point, it can only work with the `diameter_gaussian_radial` mode.
         """
+        if isinstance(ni_fov, DN_FOV_diam_gau_rad):
+            return DN_FOV_diam_gau_rad
         assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
         if ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial":
@@ -627,6 +682,30 @@ def test_attr(obj, name):
     else:
         return False
 
+names_dn = [
+            "dn_catm",
+            "dn_fov",
+            "dn_kmat",
+            "dn_wavelength",
+            "dn_target",
+            "dn_mod",
+            "dn_iout",
+            "dn_kiout",
+            "dn_kcov",
+            "dn_array"]
+names_ni = [
+            "ni_catm",
+            "ni_fov",
+            "ni_kmat",
+            "oi_wavelength",
+            "oi_target",
+            "ni_mod",
+            "ni_iout",
+            "ni_kiout",
+            "ni_kcov",
+            "oi_array"]
+
+
 class DN_NIFITS(zdx.Base):
     dn_catm: DN_CATM
     dn_fov: DN_FOV_TYPE
@@ -670,28 +749,6 @@ class DN_NIFITS(zdx.Base):
 
     @classmethod
     def from_nifits(cls, anifits):
-        names_dn = [
-                    "dn_catm",
-                    "dn_fov",
-                    "dn_kmat",
-                    "dn_wavelength",
-                    "dn_target",
-                    "dn_mod",
-                    "dn_iout",
-                    "dn_kiout",
-                    "dn_kcov",
-                    "dn_array"]
-        names_ni = [
-                    "ni_catm",
-                    "ni_fov",
-                    "ni_kmat",
-                    "oi_wavelength",
-                    "oi_target",
-                    "ni_mod",
-                    "ni_iout",
-                    "ni_kiout",
-                    "ni_kcov",
-                    "oi_array"]
         extensions = {}
         for niname, dnname in zip(names_ni, names_dn):
             if test_attr(anifits, niname):
@@ -709,8 +766,43 @@ class DN_NIFITS(zdx.Base):
                     
         print(extensions)
         return cls(**extensions)
+
+    @classmethod
+    def update(cls, adnull,
+                dn_catm: DN_CATM = None,
+                dn_fov: DN_FOV_TYPE = None,
+                dn_kmat: DN_KMAT = None,
+                dn_wavelength: DN_WAVELENGTH = None,
+                dn_oswavelength: DN_OSWAVELENGTH = None,
+                dn_target: DN_TARGET = None,
+                dn_mod: DN_MOD = None,
+                dn_iout: DN_IOUT = None,
+                dn_kiout: DN_KIOUT = None,
+                dn_kcov: DN_KCOV = None,
+                dn_dsamp: DN_DSAMP = None,
+                dn_iotags: DN_IOTAGS = None,
+                dn_array: DN_ARRAY = None):
+
+        extensions = {}
+        for niname, dnname in zip(names_ni, names_dn):
+            theinput = locals()[dnname]
+            if test_attr(adnull, dnname):
+                if theinput is None:
+                    print("Reusing ", dnname)
+                    # Exception for FOV: overwrite the object with
+                    # the specific class instead of the generic one
+                    locals()[dnname]
+                    if hasattr(adnull, dnname):
+                        myobj = getattr(adnull, dnname)
+                        extensions[dnname] = myobj
+                else:
+                    print("Updating ", dnname)
+                    extensions[dnname] = theinput
             
+        print(extensions)
+        return cls(**extensions)
         
+
 
     def fov_function(self, x, y):
         """
@@ -736,6 +828,20 @@ class DN_NIFITS(zdx.Base):
     def n_frames(self):
         self.dn_mod.all_phasors.shape[0]
 
+ext_corresp = {
+        "dn_catm": "ni_catm" ,
+        "dn_fov": "ni_fov" ,
+        "dn_kmat": "ni_kmat" ,
+        "dn_wavelength": "oi_wavelength" ,
+        "dn_oswavelength": "ni_oswavelength" ,
+        "dn_target": "oi_target" ,
+        "dn_mod": "ni_mod" ,
+        "dn_iout": "ni_iout" ,
+        "dn_kiout": "ni_kiout" ,
+        "dn_kcov": "ni_kcov" ,
+        "dn_dsamp": "ni_dsamp" ,
+        "dn_iotags": "ni_iotags"
+        }
 
 
 class DN_BB(zdx.Base):
@@ -1024,6 +1130,20 @@ class DN_NOTT_LDC_series(zdx.Base):
     @property
     def offset(self):
         return self.locseries[0]
+    
+    def phases(self, lambs):
+        phases = np.array([astep.phase(lambs) for astep in self.locseries])
+        return phases
+
+    def amplitude(self, lambs):
+        amplitudes = np.array([astep.amplitude(lambs) for astep in self.locseries])
+        return amplitudes
+
+    def phasor(self, lambs):
+        amps = self.amplitude(lambs)
+        phases = self.phases(lambs)
+        return amps*jp.exp(1j*phases)
+
 
 class DN_ErrorBankDouble(zdx.Base):
     """
@@ -1370,6 +1490,7 @@ class DN_Observation(zdx.Base):
             return Is
         Ids = jp.einsum("l w, t w o m -> t l o m", self.dn_nifits.dn_dsamp.D, Is )
         return Ids
+
 
 
 class DN_Error_Estimation(DN_Observation):
@@ -1749,6 +1870,93 @@ class DN_Post(DN_Observation):
         outs = self.get_total_single_variations(sourcelist, index,
                                             errorbank=self.error_phasor,
                                             kernels=kernels)
+
+from kernuller import VLTI
+
+nott_arg_dict = {
+    "teldiam":8.2,
+    "statlocs_":VLTI,
+}
+
+class calib_setup(DN_Observation):
+    var_vec: jp.ndarray
+    background: jp.ndarray
+    def __init__(self, dn_nifits, dn_nuisance, dn_interest,
+                        error_phasor, var_vec, background):
+        self.dn_nifits = dn_nifits
+        self.nuisance = dn_nuisance
+        self.interest = dn_interest
+        # TODO This is named a phasor but it is actually a piston
+        self.error_phasor = error_phasor
+        self.var_vec=var_vec
+        self.background = background
+
+
+    @classmethod
+    def from_probe(cls, series, arg_dict, dn_nifits):
+        # Create NIFITS
+        ## Create the oi_wavelength
+        ## Create the NI_MOD
+        ## Create the NI_CATM
+        ## Create basic NI_FOV
+        ##
+        return
+
+    def residual_outs_nuisance(self):
+        """
+        Residual of observation with all outputs.
+        """
+        outs_model = self.get_total_outs([self.nuisance], kernels=False)
+        res = jp.sum((outs_model + self.background[None,:,:] - self.dn_nifits.dn_iout.iout)**2/ self.var_vec)
+        return res
+
+    def residual_outs_nuisance_outputs(self, output):
+        """
+        Residual of observation with all outputs.
+        """
+        outs_model = self.get_total_outs([self.nuisance], kernels=False)
+        res = jp.sum((outs_model + self.background[None,:,:] - output)**2/ self.var_vec)
+        return res
+        
+        
+
+    @classmethod
+    def create_nifits(cls, ):
+        pass
+
+def full_hadamard_probe(ntel, amp, steps=5):
+    mod_shutters = shutter_probe(ntel)
+    base_probe = hadamard_modulation(ntel, amp)
+    grad_probe = graduify(base_probe, steps)
+    
+
+def hadamard_modulation(ntel, amp):
+    """
+    Returns a hadamard matrix of given 
+    """
+    import scipy as scp
+    mat = scp.linalg.hadamard(4)
+    return mat*amp
+
+def shutter_probe(ntel):
+    mod_shutters = jp.eye(ntel+1, ntel)
+    mod_shutters = jp.roll(mod_shutters, 1, axis=0)
+    return mod_shutters
+
+
+def graduify(matrix, steps):
+    newrows = []
+    for arow in matrix:
+        for i in range(steps):
+            newrow = i/steps * arow
+            newrows.append(newrow)
+    return np.array(newrows)
+
+def randomized_probe(n, ntel=4, scale=1.0e-6, func=np.random.normal):
+    mat = func(size=(n,ntel), scale=scale)
+    return mat
+    
+    
 
 """
 TODO:
