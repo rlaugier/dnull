@@ -16,7 +16,7 @@ setup(name="dnull",
     ],
     packages=["dnull"],
     install_requires=[
-            'numpy', 'scipy', 'matplotlib', 'astropy', "nifits"
+            'numpy', 'scipy', 'matplotlib', 'astropy', "nifits",
             'sympy', 'einops', "jax", "zodiax"
     ],
     zip_safe=False)
