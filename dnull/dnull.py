@@ -1928,6 +1928,7 @@ def full_hadamard_probe(ntel, amp, steps=5):
     mod_shutters = shutter_probe(ntel)
     base_probe = hadamard_modulation(ntel, amp)
     grad_probe = graduify(base_probe, steps)
+    return grad_probe
     
 
 def hadamard_modulation(ntel, amp):
