@@ -15,6 +15,9 @@ Main classes:
 from nifits import io
 from nifits import backend
 
+from pathlib import Path
+parent = Path(__file__).parent.absolute()
+
 import jax
 from jax import numpy as jp, scipy as jscipy
 import zodiax as zdx
@@ -372,8 +375,6 @@ class DN_MOD(zdx.Base):
                                             dtype=int)
         else:
             self.fov_index = fov_index
-
-        
 
     # @classmethodssmethod
     # def from_same(cls, dn_mod: DN_MOD=None):
@@ -825,7 +826,6 @@ class DN_NIFITS(zdx.Base):
                     myobj = myobj(getattr(anifits, niname))
                 extensions[dnname] = myobj
                     
-                    
         print(extensions)
         return cls(**extensions)
 
@@ -1162,7 +1162,7 @@ class DN_NOTT_LDC(zdx.Base):
 
     def __init__(self, piston, co2_ppm,
                     co2_length, glass_length,
-                    temp, pres, rhum, co2, filet_path, lambs):
+                    temp, pres, rhum, co2, lambs):
         self.piston = piston
         self.co2_ppm = co2_ppm
         self.co2_length = co2_length
@@ -1171,10 +1171,10 @@ class DN_NOTT_LDC(zdx.Base):
         from scifysim.correctors import corrector
         lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
         lab_co2 = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
-        lab_air = corrector(temp=temp, pres=pres, rhum=rhum, co2=co2)
+        lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
         self.co2_eq_index = lab_co2.get_Nair(lambs, add=0.)
         self.air_eq_index = lab_air.get_Nair(lambs, add=1.)
-        self.glass_eq_index = load_txt_index(lambs,add=0)
+        self.glass_eq_index = load_txt_index(lambs, parent/"data/caf2_index.csv")
 
     def phase(self, lambs):
         phase = 2*jp.pi/lambs[:,None] * (self.piston[None,:] * self.air_eq_index[:,None] \
@@ -2005,8 +2005,7 @@ def full_hadamard_probe(ntel, amp, steps=5):
     mod_shutters = shutter_probe(ntel)
     base_probe = hadamard_modulation(ntel, amp)
     grad_probe = graduify(base_probe, steps)
-    return grad_probe
-    
+    return mod_shutters, grad_probe
 
 def hadamard_modulation(ntel, amp):
     """
@@ -2093,3 +2092,70 @@ DN_Observation
 """
 
 
+
+colordict = {
+    "CalibSetup": "blue",
+    "DN_CPX":"crimson",
+    "DN_CPX_absangle":"darkorange",
+    "DN_NIFITS":"green",
+    "DN_WAVELENGTH":"black",
+    "DN_CATM":"purple",
+    "DN_ARRAY":"grey",
+    "DN_MOD":"darkmagenta",
+    "DN_FOV":"darkblue",
+    "DN_FOV_diam_gau_rad":"darkblue",
+    "DN_PointCollection":"olivedrab",
+    "DN_BB":"firebrick",
+    "DN_Source_BB":"firebrick1",
+    "SourceList":"goldenrod",
+    "DN_ErrorPhasorPistonPointing":"lightcoral",
+    "DN_NOTT_LDC":"limegreen",
+    "DN_NOTT_LDC_series":"forestgreen",
+    "DN_ErrorBankDouble":"lightsalmon",
+    "DN_Observation":"darkcyan",
+    "DN_Post":"orchid",
+}
+
+def build_branch(myobj, aname, modules, thegraph=None, parent=None, verbose=False):
+    from graphviz import Digraph
+    # Get type
+    if thegraph is None:
+        thegraph = Digraph()
+        thegraph.graph_attr['rankdir'] = "LR"
+    if verbose:
+        print("===============")
+        print(f"Called for a {myobj.__class__} object, {modules},  parent: {parent}")
+    myclass = myobj.__class__
+    myname = f"{aname}\n {myclass}"
+    if verbose:
+        print(f"Adding {myname}")
+    if myclass.__module__ in modules:
+        myshape = "box"
+    else:
+        myshape = "ellipse"
+    if myclass.__name__ in colordict:
+        mycolor = colordict[myclass.__name__]
+    else:
+        if verbose:
+            print("-> ->  class for color: ", myclass.__name__)
+        mycolor = "black"
+    thegraph.node(myname, shape=myshape, color=mycolor, penwidth="3")
+    if parent is not None:
+        thegraph.edge(parent, myname)
+    belonging = []
+    for amodule in modules:
+        if verbose:
+            print(amodule, myclass.__module__)
+        belonging.append(myclass.__module__ == amodule)
+    belonging = np.array(belonging)
+    if any(belonging):
+        if verbose:
+            print("Belongs", myclass)
+        for akey, childobj in zip(myobj.__dict__.keys(), myobj.__dict__.values()):
+            if verbose:
+                # print(childobj.__dict__)
+                print(f"-> Calling for {akey}")
+                print(f"Class = {childobj.__class__}")
+            build_branch(childobj, akey, modules, thegraph, parent=myname, verbose=verbose)
+    if parent is None:
+        return thegraph
