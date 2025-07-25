@@ -11,5 +11,5 @@ Contrary to the [nifits library](https://github.com/rlaugier/nifits) dNull does 
 
 
 ## Acknowledgements
-NIFITS is a development carried out in the context of the [SCIFY project](http://denis-defrere.com/scify.php). [SCIFY](http://denis-defrere.com/scify.php) has received funding from the **European Research Council (ERC)** under the European Union's Horizon 2020 research and innovation program (*grant agreement No 866070*).  Part of this work has been carried out within the framework of the NCCR PlanetS supported by the Swiss National Science Foundation under grants 51NF40_18290 and 51NF40_205606. We wish to thank Louis Desdoigts for his support in implementing the Zodiax library.
+NIFITS is supported by the Research Foundation - Flanders (FWO) under the grant number 1234224N (AIITEC project). This is achieved in the context of the [SCIFY project](http://denis-defrere.com/scify.php). [SCIFY](http://denis-defrere.com/scify.php) has received funding from the **European Research Council (ERC)** under the European Union's Horizon 2020 research and innovation program (*grant agreement No 866070*). Part of this work has been carried out within the framework of the NCCR PlanetS supported by the Swiss National Science Foundation under grants 51NF40_18290 and 51NF40_205606. We wish to thank Louis Desdoigts for his support in implementing the Zodiax library.
 

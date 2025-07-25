@@ -40,8 +40,13 @@ class DN_CPX(zdx.Base):
         self.imag = jp.asarray(complex_val.imag, dtype=float)
 
     @property
+    def isrealimag(self):
+        return True
+
+    @property
     def abs(self):
         return jp.hypot(self.real, self.imag)
+
     @property
     def angle(self):
         return jp.angle(self.real + 1j*self.imag)
@@ -51,6 +56,53 @@ class DN_CPX(zdx.Base):
     @property
     def shape(self):
         return self.real.shape
+
+    @classmethod
+    def ones(cls, shape):
+        complex_val = jp.ones(shape) + 1j*jp.zeros(shape)
+        return cls(complex_val)
+
+    @classmethod
+    def ones_like(cls, example):
+        complex_val = jp.ones_like(example) + 1j*jp.zeros_like(example)
+        return cls(complex_val)
+    
+    @classmethod
+    def zeros(cls, shape):
+        complex_val = jp.zeros(shape) + 1j*jp.zeros(shape)
+        return cls(complex_val)
+
+    @classmethod
+    def zeros_like(cls, example):
+        complex_val = jp.zeros_like(example) + 1j*jp.zeros_like(example)
+        return cls(complex_val)
+
+class DN_CPX_absangle(zdx.Base):
+    abs: jp.ndarray
+    angle: jp.ndarray
+    def __init__(self, complex_val: jp.complex64):
+        self.abs = jp.asarray(jp.abs(complex_val), dtype=float)
+        self.angle = jp.asarray(jp.angle(complex_val), dtype=float)
+
+    @property
+    def isrealimag(self):
+        return False
+
+    @property
+    def real(self):
+        return self.cpx.real
+
+    @property
+    def imag(self):
+        return self.cpx.imag
+
+    @property
+    def cpx(self):
+        return self.abs * jp.exp(1j*self.angle)
+
+    @property
+    def shape(self):
+        return self.abs.shape
 
     @classmethod
     def ones(cls, shape):
@@ -215,8 +267,15 @@ class DN_IOUT(zdx.Base):
 from astropy.io.fits import Header
 class DN_CATM(zdx.Base):
     M: DN_CPX
-    def __init__(self, ni_catm: io.oifits.NI_CATM):
-        self.M = DN_CPX(ni_catm.M)
+    def __init__(self, ni_catm: io.oifits.NI_CATM = None,
+                M: DN_CPX = None):
+        if M is None:
+            if ni_catm.realimag:
+                self.M = DN_CPX(ni_catm.M)
+            else:
+                self.M = DN_CPX_absangle(ni_catm.M)
+        else:
+            self.M = M
 
 class DN_KIOUT(zdx.Base):
     kiout: jp.ndarray
@@ -748,12 +807,15 @@ class DN_NIFITS(zdx.Base):
         # self.fov_function = self.dn_fov.fov_function
 
     @classmethod
-    def from_nifits(cls, anifits):
+    def from_nifits(cls, anifits, catm_realimag=False):
         extensions = {}
         for niname, dnname in zip(names_ni, names_dn):
             if test_attr(anifits, niname):
                 myclass = getclass(dnname.upper())
-                myobj = myclass(getattr(anifits, niname))
+                if dnname.upper() == "DN_CATM":
+                    myobj = myclass(getattr(anifits, niname))
+                else:
+                    myobj = myclass(getattr(anifits, niname))
                 print(niname, dnname)
                 # Exception for FOV: overwrite the object with
                 # the specific class instead of the generic one
@@ -768,7 +830,7 @@ class DN_NIFITS(zdx.Base):
         return cls(**extensions)
 
     @classmethod
-    def update(cls, adnull,
+    def update_object(cls, adnull,
                 dn_catm: DN_CATM = None,
                 dn_fov: DN_FOV_TYPE = None,
                 dn_kmat: DN_KMAT = None,
@@ -781,8 +843,12 @@ class DN_NIFITS(zdx.Base):
                 dn_kcov: DN_KCOV = None,
                 dn_dsamp: DN_DSAMP = None,
                 dn_iotags: DN_IOTAGS = None,
-                dn_array: DN_ARRAY = None):
-
+                dn_array: DN_ARRAY = None,
+                catm_realimag: bool = False):
+        """
+        Remains useful to change a whole object. EG when we want to
+        replance a definition of complex by real/imag with one by abs/angle.
+        """
         extensions = {}
         for niname, dnname in zip(names_ni, names_dn):
             theinput = locals()[dnname]
@@ -798,11 +864,22 @@ class DN_NIFITS(zdx.Base):
                 else:
                     print("Updating ", dnname)
                     extensions[dnname] = theinput
-            
+
+        extensions["catm_realimag"] = catm_realimag
         print(extensions)
         return cls(**extensions)
-        
 
+    @classmethod
+    def switch_cpx(cls, adnull, catm_realimag=False):
+        if catm_realimag:
+            myM = DN_CPX(adnull.dn_catm.M)
+        else:
+            myM = DN_CPX_absangle(adnull.dn_catm.M)
+        mycatm = DN_CATM(M = myM)
+        extensions = {
+            "dn_catm": mycatm
+        }
+        return cls(**extensions)
 
     def fov_function(self, x, y):
         """
@@ -1878,7 +1955,7 @@ nott_arg_dict = {
     "statlocs_":VLTI,
 }
 
-class calib_setup(DN_Observation):
+class CalibSetup(DN_Observation):
     var_vec: jp.ndarray
     background: jp.ndarray
     def __init__(self, dn_nifits, dn_nuisance, dn_interest,
