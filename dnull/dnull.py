@@ -1190,26 +1190,26 @@ class DN_NOTT_LDC(zdx.Base):
 
 
     class DN_NOTT_LDC_alt(zdx.Base):
-    """
-        Holds the *controlable* parameters of the NOTT LDC
-    `xx_eq_index` holds the equivalent index of the materials for which lengths are stated.
-    * `co2` : air-displacing length (1-n)
-    * `glass` : air-displacing length
-    * `air` : ambient air length
-    * `co2_ppm` : the co2 PPM concentration of the co2 cells
-    """
-    piston : jp.array
-    co2_ppm : jp.float32
-    co2_length : jp.array
-    glass_length : jp.array
-    co2_eq_index : jp.array
-    air_eq_index : jp.array
-    glass_eq_index : jp.array
-    temp : float
-    pres : float
-    rhum : float
-    co2 : float
-    lambs : jp.array
+        """
+            Holds the *controlable* parameters of the NOTT LDC
+        `xx_eq_index` holds the equivalent index of the materials for which lengths are stated.
+        * `co2` : air-displacing length (1-n)
+        * `glass` : air-displacing length
+        * `air` : ambient air length
+        * `co2_ppm` : the co2 PPM concentration of the co2 cells
+        """
+        piston : jp.array
+        co2_ppm : jp.float32
+        co2_length : jp.array
+        glass_length : jp.array
+        co2_eq_index : jp.array
+        air_eq_index : jp.array
+        glass_eq_index : jp.array
+        temp : float
+        pres : float
+        rhum : float
+        co2 : float
+        lambs : jp.array
 
     def __init__(self, piston, co2_ppm,
                     co2_length, glass_length,
