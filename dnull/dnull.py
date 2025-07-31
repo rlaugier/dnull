@@ -1151,6 +1151,7 @@ class DN_NOTT_LDC(zdx.Base):
     * `co2` : air-displacing length (1-n)
     * `glass` : air-displacing length
     * `air` : ambient air length
+    * `co2_ppm` : the co2 PPM concentration of the co2 cells
     """
     piston : jp.array
     co2_ppm : jp.float32
@@ -1170,8 +1171,7 @@ class DN_NOTT_LDC(zdx.Base):
         from scifysim.n_air import wet_atmo
         from scifysim.correctors import corrector
         lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
-        lab_co2 = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
-        lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
+        lab_co2 = wet_atmo(temp=temp, pres=pres, rhum=0, co2=co2_ppm)
         self.co2_eq_index = lab_co2.get_Nair(lambs, add=0.)
         self.air_eq_index = lab_air.get_Nair(lambs, add=1.)
         self.glass_eq_index = load_txt_index(lambs, parent/"data/caf2_index.csv")
@@ -1187,6 +1187,91 @@ class DN_NOTT_LDC(zdx.Base):
 
     def phasor(self, lambs):
         return self.amplitude(lambs) * jp.exp(1j*self.phase(lambs))
+
+
+    class DN_NOTT_LDC_alt(zdx.Base):
+    """
+        Holds the *controlable* parameters of the NOTT LDC
+    `xx_eq_index` holds the equivalent index of the materials for which lengths are stated.
+    * `co2` : air-displacing length (1-n)
+    * `glass` : air-displacing length
+    * `air` : ambient air length
+    * `co2_ppm` : the co2 PPM concentration of the co2 cells
+    """
+    piston : jp.array
+    co2_ppm : jp.float32
+    co2_length : jp.array
+    glass_length : jp.array
+    co2_eq_index : jp.array
+    air_eq_index : jp.array
+    glass_eq_index : jp.array
+    temp : float
+    pres : float
+    rhum : float
+    co2 : float
+    lambs : jp.array
+
+    def __init__(self, piston, co2_ppm,
+                    co2_length, glass_length,
+                    temp, pres, rhum, co2, lambs):
+        self.piston = piston
+        self.co2_ppm = co2_ppm
+        self.co2_length = co2_length
+        self.glass_length = glass_length
+        self.temp = temp
+        self.pres = pres
+        self.rhum = rhum
+        self.co2 = co2
+        self.lambs = lambs
+        from scifysim.n_air import wet_atmo
+        from scifysim.correctors import corrector
+        lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
+        lab_co2 = wet_atmo(temp=temp, pres=pres, rhum=0, co2=co2_ppm)
+        self.co2_eq_index = lab_co2.get_Nair(lambs, add=0.)
+        self.air_eq_index = lab_air.get_Nair(lambs, add=1.)
+        self.glass_eq_index = load_txt_index(lambs, parent/"data/caf2_index.csv")
+
+    def phase(self, lambs):
+        phase = 2*jp.pi/lambs[:,None] * (self.piston[None,:] * self.air_eq_index[:,None] \
+                                    + self.co2_length[None,:] * self.co2_eq_index[:,None] \
+                                    + self.gla_length[None,:] * self.glass_eq_index[:,None])
+        return phase
+
+    def amplitude(self, lambs):
+        return jp.ones_like(lambs)
+
+    def phasor(self, lambs):
+        return self.amplitude(lambs) * jp.exp(1j*self.phase(lambs))
+
+    def __add__(self, other):
+        piston = self.piston + other.piston,
+        co2_ppm = (self.co2_ppm + other.co2_ppm) / 2
+        co2_length = self.co2_length + other.co2_length
+        glass_length = self.glass_length + other.glass_length
+        temp = (self.temp + other.temp) / 2
+        pres = (self.pres + other.pres) / 2
+        rhum = (self.rhum + other.rhum) / 2
+        co2 = (self.co2 + other.co2) / 2
+        lambs = (self.lambs + other.lambs) / 2
+        new = self.__class__(piston=piston, co2_ppm=co2_ppm,
+                    co2_length=co2_length, glass_length=glass_length,
+                    temp=temp, pres=pres, rhum=rhum, co2=co2, lambs=lambs)
+        return new
+
+    def __sub__(self, other):
+        piston = self.piston - other.piston,
+        co2_ppm = (self.co2_ppm + other.co2_ppm) / 2
+        co2_length = self.co2_length + other.co2_length
+        glass_length = self.glass_length + other.glass_length
+        temp = (self.temp + other.temp) / 2
+        pres = (self.pres + other.pres) / 2
+        rhum = (self.rhum + other.rhum) / 2
+        co2 = (self.co2 + other.co2) / 2
+        lambs = (self.lambs + other.lambs) / 2
+        new = self.__class__(piston=piston, co2_ppm=co2_ppm,
+                    co2_length=co2_length, glass_length=glass_length,
+                    temp=temp, pres=pres, rhum=rhum, co2=co2, lambs=lambs)
+        return new
         
 def load_txt_index(lambs, file_path, order=3):
     import scipy.interpolate as interp
@@ -1198,22 +1283,21 @@ def load_txt_index(lambs, file_path, order=3):
     
     
 class DN_NOTT_LDC_series(zdx.Base):
-    locseries : list[DN_NOTT_LDC]
+    lseries : list[DN_NOTT_LDC]
 
     def __init__(self, locseries, offset):
-        self.locseries = locseries
-        self.offset = offset
+        self.lseries = locseries
 
     @property
     def offset(self):
-        return self.locseries[0]
+        return self.lseries[0]
     
     def phases(self, lambs):
-        phases = np.array([astep.phase(lambs) for astep in self.locseries])
+        phases = np.array([astep.phase(lambs) for astep in self.lseries])
         return phases
 
     def amplitude(self, lambs):
-        amplitudes = np.array([astep.amplitude(lambs) for astep in self.locseries])
+        amplitudes = np.array([astep.amplitude(lambs) for astep in self.lseries])
         return amplitudes
 
     def phasor(self, lambs):
@@ -2116,7 +2200,7 @@ colordict = {
     "DN_Post":"orchid",
 }
 
-def build_branch(myobj, aname, modules, thegraph=None, parent=None, verbose=False):
+def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=None, verbose=False):
     from graphviz import Digraph
     # Get type
     if thegraph is None:
@@ -2146,7 +2230,7 @@ def build_branch(myobj, aname, modules, thegraph=None, parent=None, verbose=Fals
     for amodule in modules:
         if verbose:
             print(amodule, myclass.__module__)
-        belonging.append(myclass.__module__ == amodule)
+        belonging.append((myclass.__module__ == amodule))
     belonging = np.array(belonging)
     if any(belonging):
         if verbose:
