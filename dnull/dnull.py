@@ -1152,8 +1152,10 @@ class DN_NOTT_LDC(zdx.Base):
     * `glass` : air-displacing length
     * `air` : ambient air length
     * `co2_ppm` : the co2 PPM concentration of the co2 cells
+    * `amplitude` : achromatic amplitude values (from shutters)
     """
     piston : jp.array
+    amplitude : jp.array
     co2_ppm : jp.float32
     co2_length : jp.array
     glass_length : jp.array
@@ -1163,7 +1165,8 @@ class DN_NOTT_LDC(zdx.Base):
 
     def __init__(self, piston, co2_ppm,
                     co2_length, glass_length,
-                    temp, pres, rhum, co2, lambs):
+                    temp, pres, rhum, co2, lambs,
+                    amplitude=None):
         self.piston = piston
         self.co2_ppm = co2_ppm
         self.co2_length = co2_length
@@ -1175,103 +1178,22 @@ class DN_NOTT_LDC(zdx.Base):
         self.co2_eq_index = lab_co2.get_Nair(lambs, add=0.)
         self.air_eq_index = lab_air.get_Nair(lambs, add=1.)
         self.glass_eq_index = load_txt_index(lambs, parent/"data/caf2_index.csv")
+        if amplitude is None:
+            self.amplitude = jp.ones_like(self.piston)
+        else:
+            self.amplitude = amplitude
 
     def phase(self, lambs):
         phase = 2*jp.pi/lambs[:,None] * (self.piston[None,:] * self.air_eq_index[:,None] \
                                     + self.co2_length[None,:] * self.co2_eq_index[:,None] \
-                                    + self.gla_length[None,:] * self.glass_eq_index[:,None])
+                                    + self.glass_length[None,:] * self.glass_eq_index[:,None])
         return phase
 
-    def amplitude(self, lambs):
-        return jp.ones_like(lambs)
-
     def phasor(self, lambs):
-        return self.amplitude(lambs) * jp.exp(1j*self.phase(lambs))
+        return self.amplitude[None,:] * jp.exp(1j*self.phase(lambs))
 
 
-    class DN_NOTT_LDC_alt(zdx.Base):
-        """
-            Holds the *controlable* parameters of the NOTT LDC
-        `xx_eq_index` holds the equivalent index of the materials for which lengths are stated.
-        * `co2` : air-displacing length (1-n)
-        * `glass` : air-displacing length
-        * `air` : ambient air length
-        * `co2_ppm` : the co2 PPM concentration of the co2 cells
-        """
-        piston : jp.array
-        co2_ppm : jp.float32
-        co2_length : jp.array
-        glass_length : jp.array
-        co2_eq_index : jp.array
-        air_eq_index : jp.array
-        glass_eq_index : jp.array
-        temp : float
-        pres : float
-        rhum : float
-        co2 : float
-        lambs : jp.array
 
-    def __init__(self, piston, co2_ppm,
-                    co2_length, glass_length,
-                    temp, pres, rhum, co2, lambs):
-        self.piston = piston
-        self.co2_ppm = co2_ppm
-        self.co2_length = co2_length
-        self.glass_length = glass_length
-        self.temp = temp
-        self.pres = pres
-        self.rhum = rhum
-        self.co2 = co2
-        self.lambs = lambs
-        from scifysim.n_air import wet_atmo
-        from scifysim.correctors import corrector
-        lab_air = wet_atmo(temp=temp, pres=pres, rhum=rhum, co2=co2)
-        lab_co2 = wet_atmo(temp=temp, pres=pres, rhum=0, co2=co2_ppm)
-        self.co2_eq_index = lab_co2.get_Nair(lambs, add=0.)
-        self.air_eq_index = lab_air.get_Nair(lambs, add=1.)
-        self.glass_eq_index = load_txt_index(lambs, parent/"data/caf2_index.csv")
-
-    def phase(self, lambs):
-        phase = 2*jp.pi/lambs[:,None] * (self.piston[None,:] * self.air_eq_index[:,None] \
-                                    + self.co2_length[None,:] * self.co2_eq_index[:,None] \
-                                    + self.gla_length[None,:] * self.glass_eq_index[:,None])
-        return phase
-
-    def amplitude(self, lambs):
-        return jp.ones_like(lambs)
-
-    def phasor(self, lambs):
-        return self.amplitude(lambs) * jp.exp(1j*self.phase(lambs))
-
-    def __add__(self, other):
-        piston = self.piston + other.piston,
-        co2_ppm = (self.co2_ppm + other.co2_ppm) / 2
-        co2_length = self.co2_length + other.co2_length
-        glass_length = self.glass_length + other.glass_length
-        temp = (self.temp + other.temp) / 2
-        pres = (self.pres + other.pres) / 2
-        rhum = (self.rhum + other.rhum) / 2
-        co2 = (self.co2 + other.co2) / 2
-        lambs = (self.lambs + other.lambs) / 2
-        new = self.__class__(piston=piston, co2_ppm=co2_ppm,
-                    co2_length=co2_length, glass_length=glass_length,
-                    temp=temp, pres=pres, rhum=rhum, co2=co2, lambs=lambs)
-        return new
-
-    def __sub__(self, other):
-        piston = self.piston - other.piston,
-        co2_ppm = (self.co2_ppm + other.co2_ppm) / 2
-        co2_length = self.co2_length + other.co2_length
-        glass_length = self.glass_length + other.glass_length
-        temp = (self.temp + other.temp) / 2
-        pres = (self.pres + other.pres) / 2
-        rhum = (self.rhum + other.rhum) / 2
-        co2 = (self.co2 + other.co2) / 2
-        lambs = (self.lambs + other.lambs) / 2
-        new = self.__class__(piston=piston, co2_ppm=co2_ppm,
-                    co2_length=co2_length, glass_length=glass_length,
-                    temp=temp, pres=pres, rhum=rhum, co2=co2, lambs=lambs)
-        return new
         
 def load_txt_index(lambs, file_path, order=3):
     import scipy.interpolate as interp
@@ -1301,9 +1223,10 @@ class DN_NOTT_LDC_series(zdx.Base):
         return amplitudes
 
     def phasor(self, lambs):
-        amps = self.amplitude(lambs)
-        phases = self.phases(lambs)
-        return amps*jp.exp(1j*phases)
+        return jp.array([myldc.phasor(lambs) for myldc in self.lseries])
+
+    def __len__(self):
+        return len(self.lseries)
 
 
 class DN_ErrorBankDouble(zdx.Base):
@@ -2039,8 +1962,17 @@ nott_arg_dict = {
     "statlocs_":VLTI,
 }
 
+"""
+    Typically for a chip characterization you want to fit:
+* The modulus of the CATM
+* The phase of the CATM
+* The beam collecting area as a common parameter
+* 
+
+"""
+
 class CalibSetup(DN_Observation):
-    var_vec: jp.ndarray
+    var_vec: DN_NOTT_LDC_series
     background: jp.ndarray
     def __init__(self, dn_nifits, dn_nuisance, dn_interest,
                         error_phasor, var_vec, background):
@@ -2049,7 +1981,7 @@ class CalibSetup(DN_Observation):
         self.interest = dn_interest
         # TODO This is named a phasor but it is actually a piston
         self.error_phasor = error_phasor
-        self.var_vec=var_vec
+        self.var_vec = var_vec
         self.background = background
 
 
@@ -2062,6 +1994,42 @@ class CalibSetup(DN_Observation):
         ## Create basic NI_FOV
         ##
         return
+
+    def compile_var_vec(self,
+        app_index=None,
+        dt=None,
+        daytime=None,
+        int_time=None,
+        dateobs=None,
+        appxy=None,
+        arrcol=None,
+        fov_index=None
+    ):
+        import astropy.units as units
+        mylen = len(self.var_vec)
+        ntel = self.dn_nifits.dn_catm.M.shape[1]
+        lambs = self.dn_nifits.dn_wavelength.lambs
+        times_relative = dt*jp.arange(mylen)
+        anapp_index = jp.arange(ntel)
+        int_times = dt * jp.ones(mylen)
+        if dateobs is not None:
+            from astropy.time import Time
+            dateobs = Time(dateobs) + times_relative * units.s
+        int_time = dt * jp.ones(mylen)
+        app_xy = self.dn_nifits.dn_mod.app_xy[0,:,:] * jp.ones(mylen)[:,None,None]
+        arrcol = self.dn_nifits.dn_mod.arrcol[0,:] * jp.ones(mylen)[:,None]
+        fov_index = self.dn_nifits.dn_mod.fov_index[0] * jp.ones(mylen)
+        entries = {
+            "time": times_relative,
+            "int_time": int_times,
+            "mod_phas": self.var_vec.phasor(lambs),
+            "app_xy": app_xy,
+            "arrcol": arrcol,
+            "fov_index": fov_index
+        }
+        self.dn_nifits.dn_mod.update(entries)
+
+        
 
     def residual_outs_nuisance(self):
         """
