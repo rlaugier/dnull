@@ -34,6 +34,9 @@ import sys
 def getclass(classname):
     return getattr(sys.modules[__name__], classname)
 
+import astropy.units as units
+from astropy.units import Quantity
+
 
 class DN_CPX(zdx.Base):
     real: jp.ndarray
@@ -2027,7 +2030,19 @@ class CalibSetup(DN_Observation):
             "arrcol": arrcol,
             "fov_index": fov_index
         }
-        self.dn_nifits.dn_mod.update(entries)
+        self.dn_nifits = self.dn_nifits.dn_mod.update(entries)
+
+    def update_piezo2varvec(self, probe_microns: Quantity,
+                            **kwargs):
+        """
+            Returns an updated `CalibSetup` with the var_vec updated
+        from the probe.
+        """
+        probe_m = probe_microns.to(units.m).value
+        myldcs = [DN_NOTT_LDC(piston=aprobe,
+                    **kwargs) for aprobe in probe_m]
+        myldc_list = DN_NOTT_LDC_series(myldcs, offset=jp.zeros(len(myldcs)))
+        return self.update({"var_vec": myldc_list})
 
         
 
@@ -2059,12 +2074,14 @@ def full_hadamard_probe(ntel, amp, steps=5):
     grad_probe = graduify(base_probe, steps)
     return mod_shutters, grad_probe
 
-def hadamard_modulation(ntel, amp):
+def hadamard_modulation(ntel, amp, drop_common=True):
     """
     Returns a hadamard matrix of given 
     """
     import scipy as scp
     mat = scp.linalg.hadamard(4)
+    if drop_common:
+        mat = mat[1:,:]
     return mat*amp
 
 def shutter_probe(ntel):
