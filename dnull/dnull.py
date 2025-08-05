@@ -2033,6 +2033,7 @@ class CalibSetup(DN_Observation):
         self.dn_nifits = self.dn_nifits.dn_mod.update(entries)
 
     def update_piezo2varvec(self, probe_microns: Quantity,
+                            amplitude : jp.array,
                             **kwargs):
         """
             Returns an updated `CalibSetup` with the var_vec updated
@@ -2040,6 +2041,7 @@ class CalibSetup(DN_Observation):
         """
         probe_m = probe_microns.to(units.m).value
         myldcs = [DN_NOTT_LDC(piston=aprobe,
+                    amplitude=amplitude,
                     **kwargs) for aprobe in probe_m]
         myldc_list = DN_NOTT_LDC_series(myldcs, offset=jp.zeros(len(myldcs)))
         return self.update({"var_vec": myldc_list})
