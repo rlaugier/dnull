@@ -270,7 +270,9 @@ class DN_IOUT(zdx.Base):
             self.unit = ni_iout.unit
         else:
             self.unit = unit
+
 from astropy.io.fits import Header
+
 class DN_CATM(zdx.Base):
     M: DN_CPX
     def __init__(self, ni_catm: io.oifits.NI_CATM = None,
@@ -282,6 +284,24 @@ class DN_CATM(zdx.Base):
                 self.M = DN_CPX_absangle(ni_catm.M)
         else:
             self.M = M
+
+class DN_CATM_Broadband(zdx.Base):
+    M_broad: DN_CPX
+    nwl: int
+    def __init__(self, M_broad, nwl):
+        self.M_broad = M_broad
+        self.nwl = nwl
+
+    @property
+    def M(self):
+        mymat = jp.ones(self.nwl)[:,None,None] * self.M_broad[None,:,:]
+        return mymat
+
+
+    @classmethod
+    def from_DN_CATM(cls, dn_catm: DN_CATM):
+        myM = jp.mean(dn_catm.M, axis=0)
+        return cls(M_broad=myM, nwl=dn_catm.M.shape[0])
 
 class DN_KIOUT(zdx.Base):
     kiout: jp.ndarray
@@ -322,10 +342,24 @@ class DN_KMAT(zdx.Base):
     def __init__(self, ni_kmat: io.oifits.NI_KMAT):
         self.K = jp.asarray(ni_kmat.K, dtype=float)
 
-class DN_DSAMP(zdx.Base):
+class DN_DSAMP_old(zdx.Base):
     D: jp.ndarray
     def __init__(self, ni_dsamp: io.oifits.NI_DSAMP):
         self.D = jp.asarray(ni_dsamp.D, dtype=float)
+
+class DN_DSAMP(zdx.Base):
+    D: jp.ndarray
+    def __init__(self, D: jp.ndarray):
+        if isinstance(D, io.oifits.NI_DSAMP):
+            return self.__class__.from_nifits(D)
+        else:
+            self.D = jp.asarray(D)
+
+    @classmethod
+    def from_nifits(cls, ni_dsamp: io.oifits.NI_DSAMP):
+        return cls(jp.asarray(ni_dsamp.D))
+        
+        
 
 class DN_ARRAY(zdx.Base):
     """
@@ -2044,7 +2078,7 @@ class CalibSetup(DN_Observation):
                     amplitude=amplitude,
                     **kwargs) for aprobe in probe_m]
         myldc_list = DN_NOTT_LDC_series(myldcs, offset=jp.zeros(len(myldcs)))
-        return self.update({"var_vec": myldc_list})
+        return {"var_vec": myldc_list}
 
         
 
@@ -2070,10 +2104,10 @@ class CalibSetup(DN_Observation):
     def create_nifits(cls, ):
         pass
 
-def full_hadamard_probe(ntel, amp, steps=5):
+def full_hadamard_probe(ntel, amp, steps=5, bidir=False):
     mod_shutters = shutter_probe(ntel)
     base_probe = hadamard_modulation(ntel, amp)
-    grad_probe = graduify(base_probe, steps)
+    grad_probe = graduify(base_probe, steps, bidir=bidir)
     return mod_shutters, grad_probe
 
 def hadamard_modulation(ntel, amp, drop_common=True):
@@ -2092,13 +2126,18 @@ def shutter_probe(ntel):
     return mod_shutters
 
 
-def graduify(matrix, steps):
+def graduify(matrix, nsteps, bidir=False, append_zeros=0):
+    if bidir:
+        multipliers = jp.linspace(-1,1, nsteps)
+    else:
+        multipliers = jp.linspace(0,1,nsteps)
     newrows = []
     for arow in matrix:
-        for i in range(steps):
-            newrow = i/steps * arow
+        for amult in multipliers:
+            newrow = amult * arow
             newrows.append(newrow)
     return np.array(newrows)
+
 
 def randomized_probe(n, ntel=4, scale=1.0e-6, func=np.random.normal):
     mat = func(size=(n,ntel), scale=scale)
