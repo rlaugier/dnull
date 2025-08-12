@@ -154,6 +154,12 @@ class DN_WAVELENGTH(zdx.Base):
     def __init__(self, ni_wavelength: io.oifits.OI_WAVELENGTH):
         self.lambs = jp.asarray(ni_wavelength.lambs, dtype=float)
         self.name = ni_wavelength.name
+    @classmethod
+    def from_nifits(cls, oi_wavelength: io.oifits.OI_WAVELENGTH):
+        lambs = oi_wavelength.lambs
+        dlambs = oi_wavelength.dlambs
+        name = oi_wavelength.name
+        return cls(lambs=lambs, dlambs=dlambs, name=name)
 
     @property
     def dlambs(self):
@@ -180,6 +186,15 @@ class DN_IOTAGS(zdx.Base):
         self.outphot = jp.asarray(ni_iotags.outphot, dtype=bool)
         self.inpola = np.asarray(ni_iotags.inpola, dtype=str)
         self.outpola = np.asarray(ni_iotags.outpola, dtype=str)
+    @classmethod
+    def from_nifits(cls, ni_iotags: io.oifits.NI_IOTAGS):
+        outbright = jp.asarray(ni_iotags.outbright, dtype=bool)
+        outdark = jp.asarray(ni_iotags.outdark, dtype=bool)
+        outphot = jp.asarray(ni_iotags.outphot, dtype=bool)
+        inpola = np.asarray(ni_iotags.inpola, dtype=str)
+        outpola = np.asarray(ni_iotags.outpola, dtype=str)
+        return cls(outbright=outbright, outdark=outdark, outphot=outphot,
+                inpola=inpola, outpola=outpola)
 
     @property
     def outbright(self):
@@ -237,9 +252,15 @@ class DN_OSWAVELENGTH(zdx.Base):
     lambs: jp.ndarray
     name: str
 
-    def __init__(self, ni_wavelength: io.oifits.OI_WAVELENGTH):
+    def __init__(self, ni_wavelength: io.oifits.NI_OSWAVELENGTH):
         self.lambs = jp.asarray(ni_wavelength.lambs, dtype=float)
         self.name = ni_wavelength.name
+    @classmethod
+    def from_nifits(cls, ni_oswavelength: io.oifits.NI_OSWAVELENGTH):
+        lambs = ni_oswavelength.lambs
+        dlambs = ni_oswavelength.dlambs
+        name = ni_oswavelength.name
+        return cls(lambs=lambs, dlambs=dlambs, name=name)
 
     @property
     def dlambs(self):
@@ -270,6 +291,11 @@ class DN_IOUT(zdx.Base):
             self.unit = ni_iout.unit
         else:
             self.unit = unit
+    @classmethod
+    def from_nifits(cls, ni_iout: io.oifits.NI_IOUT):
+        iout = ni_iout.iout
+        unit = ni_iout.unit
+        return cls(iout=iout, unit=unit)
 
 from astropy.io.fits import Header
 
@@ -284,6 +310,10 @@ class DN_CATM(zdx.Base):
                 self.M = DN_CPX_absangle(ni_catm.M)
         else:
             self.M = M
+    @classmethod
+    def from_nifits(cls, ni_catm: io.oifits.NI_CATM):
+        M = ni_catm.M
+        return cls(M=M)
 
 class DN_CATM_Broadband(zdx.Base):
     M_broad: DN_CPX
@@ -296,7 +326,6 @@ class DN_CATM_Broadband(zdx.Base):
     def M(self):
         mymat = jp.ones(self.nwl)[:,None,None] * self.M_broad[None,:,:]
         return mymat
-
 
     @classmethod
     def from_DN_CATM(cls, dn_catm: DN_CATM):
@@ -312,6 +341,10 @@ class DN_KIOUT(zdx.Base):
     @property
     def shape(self):
         return self.kiout.shape
+    @classmethod
+    def from_nifits(cls, ni_kiout: io.oifits.NI_KIOUT):
+        kcov = ni_kiout.kcov.data_array
+        return cls(kcov=kcov)
 
 class DN_WKIOUT(DN_KIOUT):
     Ws : jp.ndarray
@@ -2226,7 +2259,7 @@ colordict = {
     "DN_Post":"orchid",
 }
 
-def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=None, verbose=False):
+def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=None, verbose=False, absolute_path=False):
     from graphviz import Digraph
     # Get type
     if thegraph is None:
@@ -2236,7 +2269,18 @@ def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=No
         print("===============")
         print(f"Called for a {myobj.__class__} object, {modules},  parent: {parent}")
     myclass = myobj.__class__
-    myname = f"{aname}\n {myclass}"
+    if isinstance(absolute_path, str):
+        prefix = absolute_path + "." + aname
+        myname = f"{prefix}\n {myclass}"
+    elif absolute_path is False:
+        myname = f"{aname}\n {myclass}"
+        prefix = False
+    elif absolute_path is True:
+        myname = f"{aname}\n {myclass}"
+        prefix = aname
+    else:
+        raise ValueError("`absolute_path` Must be False, True or a String")
+
     if verbose:
         print(f"Adding {myname}")
     if myclass.__module__ in modules:
@@ -2266,6 +2310,8 @@ def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=No
                 # print(childobj.__dict__)
                 print(f"-> Calling for {akey}")
                 print(f"Class = {childobj.__class__}")
-            build_branch(childobj, akey, modules, thegraph, parent=myname, verbose=verbose)
+            build_branch(childobj, akey, modules, thegraph,
+                        parent=myname, verbose=verbose,
+                        absolute_path=prefix)
     if parent is None:
         return thegraph
