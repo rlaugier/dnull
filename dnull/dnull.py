@@ -149,21 +149,23 @@ class DN_WAVELENGTH(zdx.Base):
 
     """
     lambs: jp.ndarray
+    dlambs: jp.ndarray
     name: str
 
-    def __init__(self, ni_wavelength: io.oifits.OI_WAVELENGTH):
-        self.lambs = jp.asarray(ni_wavelength.lambs, dtype=float)
-        self.name = ni_wavelength.name
+    def __init__(self, lambs: jp.ndarray, dlambs: jp.ndarray, name:str):
+        self.lambs = lambs
+        self.dlambs = dlambs
+        self.name = name
     @classmethod
     def from_nifits(cls, oi_wavelength: io.oifits.OI_WAVELENGTH):
-        lambs = oi_wavelength.lambs
-        dlambs = oi_wavelength.dlambs
+        lambs = jp.asarray(oi_wavelength.lambs, dtype=float)
+        dlambs = jp.asarray(oi_wavelength.dlambs, dtype=float)
         name = oi_wavelength.name
         return cls(lambs=lambs, dlambs=dlambs, name=name)
 
-    @property
-    def dlambs(self):
-        return jp.gradient(self.lambs)
+    # @property
+    # def dlambs(self):
+    #     return jp.gradient(self.lambs)
     @property
     def nus(self):
         assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
@@ -180,12 +182,12 @@ class DN_IOTAGS(zdx.Base):
     inpola: np.ndarray
     outpola: np.ndarray
 
-    def __init__(self, ni_iotags: io.oifits.NI_IOTAGS):
-        self.outbright = jp.asarray(ni_iotags.outbright, dtype=bool)
-        self.outdark = jp.asarray(ni_iotags.outdark, dtype=bool)
-        self.outphot = jp.asarray(ni_iotags.outphot, dtype=bool)
-        self.inpola = np.asarray(ni_iotags.inpola, dtype=str)
-        self.outpola = np.asarray(ni_iotags.outpola, dtype=str)
+    def __init__(self, outbright: jp.ndarray, outdark: jp.ndarray, outphot: jp.ndarray,
+                inpola: np.ndarray, outpola: np.ndarray):
+        self.outdark = jp.asarray(outdark, dtype=bool)
+        self.outphot = jp.asarray(outphot, dtype=bool)
+        self.inpola = np.asarray(inpola, dtype=str)
+        self.outpola = np.asarray(outpola, dtype=str)
     @classmethod
     def from_nifits(cls, ni_iotags: io.oifits.NI_IOTAGS):
         outbright = jp.asarray(ni_iotags.outbright, dtype=bool)
@@ -250,15 +252,16 @@ class DN_OSWAVELENGTH(zdx.Base):
 
     """
     lambs: jp.ndarray
+    dlambs: jp.ndarray
     name: str
 
-    def __init__(self, ni_wavelength: io.oifits.NI_OSWAVELENGTH):
-        self.lambs = jp.asarray(ni_wavelength.lambs, dtype=float)
-        self.name = ni_wavelength.name
+    def __init__(self, lambs: jp.ndarray, dlambs: jp.ndarray, name: str):
+        self.dlambs = jp.asarray(dlambs, dtype=float)
+        self.name = name
     @classmethod
     def from_nifits(cls, ni_oswavelength: io.oifits.NI_OSWAVELENGTH):
-        lambs = ni_oswavelength.lambs
-        dlambs = ni_oswavelength.dlambs
+        lambs = jp.asarray(ni_oswavelength.lambs, dtype=float)
+        dlambs = jp.asarray(ni_oswavelength.dlambs, dtype=float)
         name = ni_oswavelength.name
         return cls(lambs=lambs, dlambs=dlambs, name=name)
 
@@ -280,20 +283,13 @@ class DN_IOUT(zdx.Base):
     iout: jp.ndarray
     unit: units.Unit
 
-    def __init__(self, ni_iout: io.oifits.NI_IOUT,
-                    iout=None,
-                    unit=None):
-        if iout is None:
-            self.iout = jp.asarray(ni_iout.iout, dtype=float)
-        else:
-            self.iout = iout
-        if units is None:
-            self.unit = ni_iout.unit
-        else:
-            self.unit = unit
+    def __init__(self, iout:jp.ndarray,
+                    unit:units.Unit):
+        self.iout = jp.asarray(iout, dtype=float)
+        self.unit = unit
     @classmethod
     def from_nifits(cls, ni_iout: io.oifits.NI_IOUT):
-        iout = ni_iout.iout
+        iout = jp.asarray(ni_iout.iout, dtype=float)
         unit = ni_iout.unit
         return cls(iout=iout, unit=unit)
 
@@ -301,19 +297,12 @@ from astropy.io.fits import Header
 
 class DN_CATM(zdx.Base):
     M: DN_CPX
-    def __init__(self, ni_catm: io.oifits.NI_CATM = None,
-                M: DN_CPX = None):
-        if M is None:
-            if ni_catm.realimag:
-                self.M = DN_CPX(ni_catm.M)
-            else:
-                self.M = DN_CPX_absangle(ni_catm.M)
-        else:
-            self.M = M
+    def __init__(self, M: DN_CPX):
+        self.M = M
     @classmethod
     def from_nifits(cls, ni_catm: io.oifits.NI_CATM):
-        M = ni_catm.M
-        return cls(M=M)
+        M = DN_CPX(ni_catm.M)
+        return cls(M=M,)
 
 class DN_CATM_Broadband(zdx.Base):
     M_broad: DN_CPX
@@ -331,26 +320,33 @@ class DN_CATM_Broadband(zdx.Base):
     def from_DN_CATM(cls, dn_catm: DN_CATM):
         myM = jp.mean(dn_catm.M, axis=0)
         return cls(M_broad=myM, nwl=dn_catm.M.shape[0])
+    @classmethod
+    def from_nifits(cls, ni_catm: io.oifits.NI_CATM):
+        myM = jp.mean(ni_catm.M, axis=0)
+        return cls(M_broad=myM, nwl=ni_catm.M.shape[0])
 
 class DN_KIOUT(zdx.Base):
     kiout: jp.ndarray
     unit: units.Unit
-    def __init__(self, ni_kiout: io.oifits.NI_KIOUT):
-        self.kiout = jp.asarray(ni_kiout.kiout, dtype=float)
-        self.unit = ni_kiout.unit
+    def __init__(self, kiout: jp.ndarray, unit:units.Unit):
+        self.kiout = jp.asarray(kiout, dtype=float)
+        self.unit = unit
     @property
     def shape(self):
         return self.kiout.shape
     @classmethod
     def from_nifits(cls, ni_kiout: io.oifits.NI_KIOUT):
-        kcov = ni_kiout.kcov.data_array
-        return cls(kcov=kcov)
+        kiout = jp.asarray(ni_kiout.kiout, dtype=float)
+        unit=ni_kiout.unit
+        return cls(kiout=kiout, unit=unit)
 
 class DN_WKIOUT(DN_KIOUT):
+    kiout : jp.ndarray
     Ws : jp.ndarray
+    unit : units.Unit
     def __init__(self, dn_kiout, Ws):
-        self.Ws = Ws
-        self.kiout = dn_kiout.kiout
+        self.kiout = jp.asarray(dn_kiout.kiout, dtype=float)
+        self.Ws = jp.asarray(Ws, dtype=float)
         self.unit = dn_kiout.unit
         
     def whitened_kiout(self):
@@ -366,31 +362,33 @@ class DN_WKIOUT(DN_KIOUT):
 class DN_KCOV(zdx.Base):
     kcov: jp.ndarray
     unit: units.Unit
-    def __init__(self, ni_kcov: io.oifits.NI_KCOV):
-        self.kcov = jp.asarray(ni_kcov.kcov, dtype=float)
-        self.unit = ni_kcov.unit
+    def __init__(self, kcov: jp.ndarray, unit: units.Unit):
+        self.kcov = jp.asarray(kcov, dtype=float)
+        self.unit = unit
+    @classmethod
+    def from_nifits(cls, ni_kcov: io.oifits.NI_KCOV):
+        kcov = jp.asarray(ni_kcov.kcov, dtype=float)
+        unit = ni_kcov.unit
+        return cls(kcov=kcov, unit=unit)
 
 class DN_KMAT(zdx.Base):
     K: jp.ndarray
-    def __init__(self, ni_kmat: io.oifits.NI_KMAT):
-        self.K = jp.asarray(ni_kmat.K, dtype=float)
+    def __init__(self, K):
+        self.K = jp.asarray(K, dtype=float)
+    @classmethod
+    def from_nifits(cls, ni_kmat: io.oifits.NI_KMAT):
+        K = jp.asarray(ni_kmat.K, dtype=float)
+        return cls(K)
 
-class DN_DSAMP_old(zdx.Base):
-    D: jp.ndarray
-    def __init__(self, ni_dsamp: io.oifits.NI_DSAMP):
-        self.D = jp.asarray(ni_dsamp.D, dtype=float)
 
 class DN_DSAMP(zdx.Base):
     D: jp.ndarray
     def __init__(self, D: jp.ndarray):
-        if isinstance(D, io.oifits.NI_DSAMP):
-            return self.__class__.from_nifits(D)
-        else:
-            self.D = jp.asarray(D)
-
+        self.D = jp.asarray(D, dtype=float)
     @classmethod
     def from_nifits(cls, ni_dsamp: io.oifits.NI_DSAMP):
-        return cls(jp.asarray(ni_dsamp.D))
+        D = ni_dsamp.D
+        return cls(jp.asarray(ni_dsamp.D, dtype=float))
         
         
 
@@ -411,7 +409,32 @@ class DN_MOD(zdx.Base):
     arrcol: jp.ndarray
     fov_index: jp.ndarray
 
-    def __init__(self, ni_mod: io.oifits.NI_MOD=None,
+    def __init__(self, time=None,
+                        int_time=None,
+                        mod_phas=None,
+                        app_xy=None,
+                        arrcol=None,
+                        fov_index=None,
+                        clip_length=None):            
+        self.time = time
+        self.int_time = int_time
+        self.mod_phas = mod_phas
+        self.app_xy = app_xy
+        self.arrcol = arrcol
+        self.fov_index = fov_index
+    @classmethod
+    def from_nifits(cls, ni_mod: io.oifits.NI_MOD=None):            
+        time = jp.asarray(ni_mod.data_table["TIME"].data,
+                                            dtype=float)
+        int_time = jp.asarray(ni_mod.int_time, dtype=float)
+        mod_phas = DN_CPX(ni_mod.all_phasors)
+        app_xy = jp.asarray(ni_mod.appxy, dtype=float)
+        arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
+        fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
+                                            dtype=int)
+        return cls(time, int_time, mod_phas, app_xy, arrcol, fov_index)
+    @classmethod
+    def from_same(cls, ni_mod: io.oifits.NI_MOD=None,
                         time=None,
                         int_time=None,
                         mod_phas=None,
@@ -420,31 +443,33 @@ class DN_MOD(zdx.Base):
                         fov_index=None,
                         clip_length=None):            
         if time is None:
-            self.time = jp.asarray(ni_mod.data_table["TIME"].data,
+            time = jp.asarray(ni_mod.data_table["TIME"].data,
                                             dtype=float)
         else:
-            self.time = time
+            time = time
         if int_time is None:
-            self.int_time = jp.asarray(ni_mod.int_time, dtype=float)
+            int_time = jp.asarray(ni_mod.int_time, dtype=float)
         else:
-            self.int_time = int_time
+            int_time = int_time
         if mod_phas is None:
-            self.mod_phas = DN_CPX(ni_mod.all_phasors)
+            mod_phas = DN_CPX(ni_mod.all_phasors)
         else:
-            self.mod_phas = mod_phas
+            mod_phas = mod_phas
         if app_xy is None:
-            self.app_xy = jp.asarray(ni_mod.appxy, dtype=float)
+            app_xy = jp.asarray(ni_mod.appxy, dtype=float)
         else:
-            self.app_xy = app_xy
+            app_xy = app_xy
         if arrcol is None:
-            self.arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
+            arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
         else:
-            self.arrcol = arrcol
+            arrcol = arrcol
         if fov_index is None:
-            self.fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
+            fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
                                             dtype=int)
         else:
-            self.fov_index = fov_index
+            fov_index = fov_index
+        return cls(time, int_time, mod_phas, app_xy, arrcol, fov_index)
+
 
     # @classmethodssmethod
     # def from_same(cls, dn_mod: DN_MOD=None):
@@ -492,6 +517,12 @@ class DN_FOV(object):
             assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
         self = DN_FOV_diam_gau_rad(ni_fov)
+    @classmethod
+    def from_nifits(cls, ni_fov: io.oifits.NI_FOV):
+        """
+        Just a pass-through classmethod
+        """
+        return cls(ni_fov)
 
     def correct_fov_class(self, ni_fov: io.oifits.NI_FOV):
         """
@@ -878,7 +909,7 @@ class DN_NIFITS(zdx.Base):
         # self.fov_function = self.dn_fov.fov_function
 
     @classmethod
-    def from_nifits(cls, anifits, catm_realimag=False):
+    def from_old(cls, anifits, catm_realimag=False):
         extensions = {}
         for niname, dnname in zip(names_ni, names_dn):
             if test_attr(anifits, niname):
@@ -895,6 +926,26 @@ class DN_NIFITS(zdx.Base):
                     myobj = myobj.correct_fov_class(getattr(anifits, niname))
                     myobj = myobj(getattr(anifits, niname))
                 extensions[dnname] = myobj
+                    
+        print(extensions)
+        return cls(**extensions)
+
+    @classmethod
+    def from_nifits(cls, anifits, catm_realimag=False):
+        extensions = {}
+        for niname, dnname in zip(names_ni, names_dn):
+            if test_attr(anifits, niname):
+                myclass = getclass(dnname.upper())
+                print(niname, dnname)
+                myobj = myclass.from_nifits(getattr(anifits, niname))
+                # Exception for FOV: overwrite the object with
+                # the specific class instead of the generic one
+                if dnname == "dn_fov":
+                    print("Triggering dn_fov")
+                    myobj = myobj.correct_fov_class(getattr(anifits, niname))
+                    myobj = myobj(getattr(anifits, niname))
+                extensions[dnname] = myobj
+                print(niname, dnname, "Done")
                     
         print(extensions)
         return cls(**extensions)
@@ -942,9 +993,9 @@ class DN_NIFITS(zdx.Base):
     @classmethod
     def switch_cpx(cls, adnull, catm_realimag=False):
         if catm_realimag:
-            myM = DN_CPX(adnull.dn_catm.M)
+            myM = DN_CPX(adnull.dn_catm.M.cpx)
         else:
-            myM = DN_CPX_absangle(adnull.dn_catm.M)
+            myM = DN_CPX_absangle(adnull.dn_catm.M.cpx)
         mycatm = DN_CATM(M = myM)
         extensions = {
             "dn_catm": mycatm
