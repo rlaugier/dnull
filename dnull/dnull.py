@@ -561,6 +561,20 @@ class DN_FOV_diam_gau_rad(zdx.Base):
                         y[None,None, :] - self.offset[:,:, 1, None])
         phasor = jp.exp(-(r[:,:]/r_0[:,None])**2)
         return phasor.astype(jp.complex64)
+    
+    def fov_pointing_offset_cst_abs(self, x, lambs):
+        """
+        Args :
+            x: The angles [rad] for each telescopes
+            lambs: The wavelengths [m]
+        Returns :
+            amp: the modulus of the phasor
+        """
+
+        y = jp.zeros_like(x)
+        phasor = self.fov_function(x, y, lambs)
+        return jp.abs()
+        
 
 
 
