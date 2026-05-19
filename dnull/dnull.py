@@ -634,10 +634,13 @@ class DN_PointCollection(object):
             Create a point collection as a uniformly sampled disk.
 
         Args:
-            a_coords : The array of samples along the first axis
-                  (typically alpha)
-            b_coords : The array of samples along the second axis
-                  (typically beta, the second dimension)
+            radius :   [mas] The angular radius of the disk to model
+            n      :   The total number of points to create
+            phi_0  :   [rad] Arbitrary angle to initialiaze pattern
+            offset :   [mas] An offset of the disk location with respect
+                to the center of the field of view
+            md     :   The numerical module to use as backend
+            unit   :   The unit to use for interactions
 
         **Handles:**
         """
@@ -1000,12 +1003,15 @@ class DN_NIFITS(zdx.Base):
                     print("Updating ", dnname)
                     extensions[dnname] = theinput
 
-        extensions["catm_realimag"] = catm_realimag
+        # extensions["catm_realimag"] = catm_realimag
         print(extensions)
         return cls(**extensions)
 
     @classmethod
     def switch_cpx(cls, adnull, catm_realimag=False):
+        """
+            Switches the CATM from a real-ima
+        """
         if catm_realimag:
             myM = DN_CPX(adnull.dn_catm.M.cpx)
         else:
@@ -1111,11 +1117,11 @@ class DN_Source_BB(zdx.Base):
     def __init__(self, locs: DN_PointCollection,
                     blackbody: DN_BB):
         self.locs = locs
-        self.blackbody = DN_BB
+        self.blackbody = blackbody
 
-    @property
-    def irradiance(self):
-        pass
+    def irradiance(self, lambs):
+        return self.blackbody.model(lambs)
+
     @classmethod
     def radial_from_bond_albedo(cls, locs, transformation,
                              cross_section: jp.ndarray = None,
@@ -1137,8 +1143,8 @@ class DN_Source_BB(zdx.Base):
     @classmethod
     def uniform_disk(cls, locs, transformation,
                      cross_section: jp.ndarray = None,
-                     T_eff: float = 5300,
-                     distance: float = 10):
+                     T_eff: float = 5300.,
+                     distance: float = 10.):
         mybb = DN_BB(T_eff, cross_section=cross_section,
                             col_dens=None)
         return cls(locs, mybb)
@@ -1217,7 +1223,63 @@ class SourceList(zdx.Base):
             raise AttributeError(f"{key} not in {self.sources.keys()}")
 
 
-        
+class DN_OffsetPhasor(zdx.Base):
+    piston_offset : jp.ndarray
+    pointing : jp.ndarray
+    fourDsquare : jp.ndarray
+    """
+    A class to define a simple constant error on the same elements
+    as DN_ErrorPhasorPiston Pointing
+    """
+
+    def __init__(self, piston, pointing, D):
+        self.piston_offset = jp.asarray(piston, dtype=float)
+        self.pointing = jp.asarray(pointing, dtype=float)
+        self.fourDsquare = 4*D**2
+
+    def phasor(self, lambs):
+        """
+        The effect of pointing can be modeled as such:
+        ```python
+            import sympy as sp
+            r, r_0, lamb_s, D = sp.symbols("r,r_0, lambda, D", real=True, positive=True)
+            e = sp.exp(-(r/r_0)**2)
+            e_series = sp.series(e.subs([(r_0, 1/2*lamb_s/D)]), r, n=4)
+            sp.print_latex(e_series)
+            e_series
+        ```
+        $ A(\\lambda) = 1 - \\frac{4.0 D^{2} r^{2}}{\\lambda^{2}} + O\\left(r^{4}\\right) $
+        """
+        amp = (1 - self.fourDsquare / lambs[None,:,None]**2
+                        * self.pointing[None,None,:]**2)
+        phase = self.piston_offset[None,None,:] * 2 * jp.pi / lambs[None,:,None]
+        return amp[:,:,:] * jp.exp(1j * phase)
+
+    def single_phasor(self, lambs, index):
+        """
+        """
+        amp = (1 - self.fourDsquare / lambs[:,None]**2
+                        * self.pointing[None,:]**2)
+        phase = self.piston_offset[None,:] * 2 * jp.pi / lambs[:,None]
+        return amp[:,:] * jp.exp(1j * phase)
+
+    @classmethod
+    def no_error(cls, mydn):
+        """
+        Creates a neutral error vector
+
+        Args:
+            mydn : a DN_NIFITS object to use for the shape of the arrays.
+            D    : The main collector diameter
+        """
+        nwl = mydn.dn_wavelength.lambs.shape
+        # n_frams = mydn.dn_mod.n_series
+        n_inputs = mydn.dn_mod.all_phasors.shape[-1]
+        piston = jp.zeros((n_inputs,))
+        pointing = jp.zeros((n_inputs,))
+        D = mydn.dn_fov.D
+        myobj = cls(piston=piston, pointing=pointing, D=D)
+        return myobj
 
 class DN_ErrorPhasorPistonPointing(zdx.Base):
     """
@@ -1227,7 +1289,7 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
     pointing error and the associated chromatic injection amplitude.
     """
     piston : jp.ndarray
-    pointing : jp.ndarray
+    pointing : jp.ndarray #  pointing in microrad !!!
     fourDsquare : jp.float32
 
     def __init__(self, piston, pointing, D):
@@ -1248,16 +1310,18 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
         ```
         $ A(\\lambda) = 1 - \\frac{4.0 D^{2} r^{2}}{\\lambda^{2}} + O\\left(r^{4}\\right) $
         """
-        amp = (1 - self.fourDsquare / lambs[None,:,None]**2
-                        * self.pointing[:,None,:]**2)
+        adrop = self.fourDsquare / lambs[None,:,None]**2\
+                        * (1e-6*self.pointing[:,None,:])**2
+        amp = (1 - jp.clip(adrop, 0.0, 1.0))
         phase = self.piston[:,None,:] * 2 * jp.pi / lambs[None,:,None]
         return amp[:,:,:] * jp.exp(1j * phase)
 
     def single_phasor(self, lambs, index):
         """
         """
-        amp = (1 - self.fourDsquare / lambs[:,None]**2
-                        * self.pointing[None,:]**2)
+        adrop = self.fourDsquare / lambs[:,None]**2\
+                        * (1e-6*self.pointing[None,:])**2
+        amp = (1 - jp.clip(adrop, 0.0, 1.0))
         phase = self.piston[None,:] * 2 * jp.pi / lambs[:,None]
         return amp[:,:] * jp.exp(1j * phase)
 
@@ -1458,7 +1522,7 @@ class DN_Observation(zdx.Base):
         self.error_phasor = error_phasor
 
 
-    def geometric_phasor(self, sourcelist):
+    def geometric_phasor(self, sourcelist, irrad=False):
         """
         Returns the complex phasor corresponding to the locations
         of the family of sources
@@ -1482,12 +1546,16 @@ class DN_Observation(zdx.Base):
             k = 2*jp.pi/lambs
             a = jp.array((alphas, betas), dtype=jp.float32)
             phi = - k[:,None,None,None] * jp.einsum("t a x, x m -> t a m", xy_array[:,:,:], a[:,:])
-            b = jp.exp(1j*phi)
+            if irrad:
+                ir = asource.irradiance(self.dn_nifits.dn_wavelength.lambs)
+                b = np.sqrt(ir)[:,None,None,None] * jp.exp(1j*phi)
+            else:
+                b = jp.exp(1j*phi)
             allbs.append(b)
         bs = jp.concatenate(allbs, axis=-1)
         return bs.transpose((1,0,2,3))
 
-    def single_geometric_phasor(self, sourcelist, index):
+    def single_geometric_phasor(self, sourcelist, index, irrad=False):
         """
         Returns the complex phasor corresponding to the locations
         of the family of sources
@@ -1511,7 +1579,11 @@ class DN_Observation(zdx.Base):
             k = 2*jp.pi/lambs
             a = jp.array((alphas, betas), dtype=jp.float32)
             phi = - k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:], a[:,:])
-            b = jp.exp(1j*phi)
+            if irrad:
+                ir = asource.irradiance(self.dn_nifits.dn_wavelength.lambs)
+                b = np.sqrt(ir)[:,None,None] * jp.exp(1j*phi)
+            else:
+                b = jp.exp(1j*phi)
             allbs.append(b)
         bs = jp.concatenate(allbs, axis=-1)
         return bs.transpose((1,0,2,3))
@@ -2180,20 +2252,24 @@ class CalibSetup(DN_Observation):
 
         
 
-    def residual_outs_nuisance(self):
+    def residual_outs_nuisance(self, verbose=False):
         """
         Residual of observation with all outputs.
         """
         outs_model = self.get_total_outs([self.nuisance], kernels=False)
         res = jp.sum((outs_model + self.background[None,:,:] - self.dn_nifits.dn_iout.iout)**2/ self.var_vec)
+        if verbose:
+            return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
         return res
 
-    def residual_outs_nuisance_outputs(self, output):
+    def residual_outs_nuisance_outputs(self, output, verbose=False):
         """
         Residual of observation with all outputs.
         """
         outs_model = self.get_total_outs([self.nuisance], kernels=False)
         res = jp.sum((outs_model + self.background[None,:,:] - output)**2/ self.var_vec)
+        if verbose:
+            return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
         return res
         
         
@@ -2375,7 +2451,8 @@ def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=No
                 # print(childobj.__dict__)
                 print(f"-> Calling for {akey}")
                 print(f"Class = {childobj.__class__}")
-            build_branch(childobj, akey, modules, thegraph,
+            if akey not in ["__doc__", "__module__", "__annotations__"]:
+                build_branch(childobj, akey, modules, thegraph,
                         parent=myname, verbose=verbose,
                         absolute_path=prefix)
     if parent is None:
