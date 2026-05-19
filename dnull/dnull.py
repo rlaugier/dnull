@@ -564,7 +564,7 @@ class DN_FOV_diam_gau_rad(zdx.Base):
 
         y = jp.zeros_like(x)
         phasor = self.fov_function(x, y, lambs)
-        return jp.abs()
+        return jp.abs(phasor.mean(axis=0))
         
 
 
@@ -1127,7 +1127,9 @@ class DN_Source_BB(zdx.Base):
         self.blackbody = blackbody
 
     def irradiance(self, lambs):
-        return self.blackbody.model(lambs)
+        irrads =  self.blackbody.model(lambs)[:,None]\
+                * jp.ones_like(self.locs.aa)[None,:]
+        return irrads
 
     @classmethod
     def radial_from_bond_albedo(cls, locs, transformation,
@@ -1651,7 +1653,7 @@ class DN_Observation(zdx.Base):
         # TODO: inefficient: ideally compute only the needed one.
         return gs[index,:,:][None, :,:]
 
-    def get_Is(self, xs):
+    def get_Is(self, xs, sourcelist=None):
         """
         Get intensity from an array of sources.
 
@@ -1713,7 +1715,14 @@ class DN_Observation(zdx.Base):
         
         # this is actually a collecting area
         Es = xs * x_inj[:,:,None,:] * x_mod[:,:,:,None]
-        Is = self.get_Is(Es)
+        preIs = self.get_Is(Es)
+        irrads = []
+        for asource in sourcelist:
+            irrad = asource.irradiance(self.dn_nifits.dn_wavelength.lambs)
+            irrads.append(irrad)
+        irs = jp.concatenate(irrads, axis=-1)
+        Is = preIs # * irs[None,:,None,:]
+
         if kernels:
             KIs = self.get_KIs(Is)
             return self.downsample(KIs)
