@@ -524,6 +524,23 @@ class DN_FOV_diam_gau_rad(zdx.Base):
         self.D = jp.asarray(D*uD.to(units.m), dtype=float)
         self.offset = jp.asarray(ni_fov.data_table["OFFSETS"], dtype=float)
 
+    @classmethod
+    def from_diameter(cls, D, lambs):
+        """
+            Create a dn_fov object from a collector diameter
+        
+        Args:
+            D: [m]
+            lambs: [m]
+        """
+        from astropy.io import fits
+        base_header = niio.NI_FOV_DEFAULT_HEADER.copy()
+        base_header["HIERARCH NIFITS FOV_TELDIAM"] = D
+        myni_fov = niio.NI_FOV.simple_from_header(header=base_header,
+                                                    lamb=lambs)
+        return cls(ni_fov=myni_fov)
+        
+
     def fov_function(self, x, y, lambs):
         """
         Returns the phasor corresponding to position in FOV
@@ -1216,16 +1233,17 @@ class SourceList(zdx.Base):
 class DN_OffsetPhasor(zdx.Base):
     piston_offset : jp.ndarray
     pointing : jp.ndarray
-    fourDsquare : jp.ndarray
+    fov_obj : DN_FOV_diam_gau_rad
     """
     A class to define a simple constant error on the same elements
     as DN_ErrorPhasorPiston Pointing
     """
 
-    def __init__(self, piston, pointing, D):
+    def __init__(self, piston, pointing, fov_obj):
         self.piston_offset = jp.asarray(piston, dtype=float)
         self.pointing = jp.asarray(pointing, dtype=float)
-        self.fourDsquare = 4*D**2
+        # self.fourDsquare = 4*D**2
+        self.fov_obj = fov_obj
 
     def phasor(self, lambs):
         """
@@ -1240,21 +1258,26 @@ class DN_OffsetPhasor(zdx.Base):
         ```
         $ A(\\lambda) = 1 - \\frac{4.0 D^{2} r^{2}}{\\lambda^{2}} + O\\left(r^{4}\\right) $
         """
-        amp = (1 - self.fourDsquare / lambs[None,:,None]**2
-                        * self.pointing[None,None,:]**2)
+        # amp = (1 - self.fourDsquare / lambs[None,:,None]**2
+        #                 * self.pointing[None,None,:]**2)
+        amp = self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)[None,:,:]
         phase = self.piston_offset[None,None,:] * 2 * jp.pi / lambs[None,:,None]
         return amp[:,:,:] * jp.exp(1j * phase)
 
     def single_phasor(self, lambs, index):
         """
+        Args:
+            lambs: [m]
+            index: 
         """
-        amp = (1 - self.fourDsquare / lambs[:,None]**2
-                        * self.pointing[None,:]**2)
+        # amp = (1 - self.fourDsquare / lambs[:,None]**2
+        #                 * self.pointing[None,:]**2)
+        amp = self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)
         phase = self.piston_offset[None,:] * 2 * jp.pi / lambs[:,None]
         return amp[:,:] * jp.exp(1j * phase)
 
     @classmethod
-    def no_error(cls, mydn):
+    def no_error(cls, mydn, fov_obj=None, D=None, lambs=None):
         """
         Creates a neutral error vector
 
@@ -1267,8 +1290,11 @@ class DN_OffsetPhasor(zdx.Base):
         n_inputs = mydn.dn_mod.all_phasors.shape[-1]
         piston = jp.zeros((n_inputs,))
         pointing = jp.zeros((n_inputs,))
-        D = mydn.dn_fov.D
-        myobj = cls(piston=piston, pointing=pointing, D=D)
+        if fov_obj is None:
+            fov_obj = DN_FOV_diam_gau_rad.from_diameter(D,lambs)
+        myobj = cls(piston=piston,
+                    pointing=pointing,
+                    fov_obj=fov_obj)
         return myobj
 
 class DN_ErrorPhasorPistonPointing(zdx.Base):
@@ -2171,8 +2197,10 @@ nott_arg_dict = {
 class CalibSetup(DN_Observation):
     var_vec: DN_NOTT_LDC_series
     background: jp.ndarray
+    variance: jp.ndarray
     def __init__(self, dn_nifits, dn_nuisance, dn_interest,
-                        error_phasor, var_vec, background):
+                        error_phasor, var_vec, background,
+                        variance):
         self.dn_nifits = dn_nifits
         self.nuisance = dn_nuisance
         self.interest = dn_interest
@@ -2180,6 +2208,7 @@ class CalibSetup(DN_Observation):
         self.error_phasor = error_phasor
         self.var_vec = var_vec
         self.background = background
+        self.variance = variance
 
 
     @classmethod
@@ -2247,7 +2276,7 @@ class CalibSetup(DN_Observation):
         Residual of observation with all outputs.
         """
         outs_model = self.get_total_outs([self.nuisance], kernels=False)
-        res = jp.sum((outs_model + self.background[None,:,:] - self.dn_nifits.dn_iout.iout)**2/ self.var_vec)
+        res = jp.sum((outs_model + self.background[None,:,:] - self.dn_nifits.dn_iout.iout)**2/ self.variance)
         if verbose:
             return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
         return res
@@ -2257,12 +2286,10 @@ class CalibSetup(DN_Observation):
         Residual of observation with all outputs.
         """
         outs_model = self.get_total_outs([self.nuisance], kernels=False)
-        res = jp.sum((outs_model + self.background[None,:,:] - output)**2/ self.var_vec)
+        res = jp.sum((outs_model + self.background[None,:,:] - output)**2/ self.variance)
         if verbose:
             return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
         return res
-        
-        
 
     @classmethod
     def create_nifits(cls, ):
