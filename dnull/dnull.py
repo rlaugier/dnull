@@ -176,18 +176,23 @@ class DN_WAVELENGTH(zdx.Base):
         return jp.gradient(cst.c.value/self.dlambs)
 
 class DN_IOTAGS(zdx.Base):
+    """
+        IOTAGS
+    """
     outbright: jp.ndarray
     outdark: jp.ndarray
     outphot: jp.ndarray
-    inpola: np.ndarray
-    outpola: np.ndarray
+    # inpola: np.ndarray
+    # outpola: np.ndarray
 
     def __init__(self, outbright: jp.ndarray, outdark: jp.ndarray, outphot: jp.ndarray,
                 inpola: np.ndarray, outpola: np.ndarray):
+        self.outbright = jp.asarray(outbright, dtype=bool)
         self.outdark = jp.asarray(outdark, dtype=bool)
         self.outphot = jp.asarray(outphot, dtype=bool)
-        self.inpola = np.asarray(inpola, dtype=str)
-        self.outpola = np.asarray(outpola, dtype=str)
+        # self.inpola = np.asarray(inpola, dtype=str)
+        # self.outpola = np.asarray(outpola, dtype=str)
+
     @classmethod
     def from_nifits(cls, ni_iotags: niio.NI_IOTAGS):
         outbright = jp.asarray(ni_iotags.outbright, dtype=bool)
@@ -197,37 +202,6 @@ class DN_IOTAGS(zdx.Base):
         outpola = np.asarray(ni_iotags.outpola, dtype=str)
         return cls(outbright=outbright, outdark=outdark, outphot=outphot,
                 inpola=inpola, outpola=outpola)
-
-    @property
-    def outbright(self):
-        """
-        The flags of bright outputs
-        """
-        return self.outbright
-    @property
-    def outdark(self):
-        """
-        The flags of dark outputs
-        """
-        return self.outdark
-    @property
-    def outphot(self):
-        """
-        The flags of photometric outputs
-        """
-        return self.outphot
-    @property
-    def outpola(self):
-        """
-        The polarization of outputs.
-        """
-        return self.outpola
-    @property
-    def inpola(self):
-        """
-        The polarization of inputs.
-        """
-        return self.inpola
 
 class DN_OSWAVELENGTH(zdx.Base):
     """
@@ -884,7 +858,8 @@ names_dn = [
             "dn_iout",
             "dn_kiout",
             "dn_kcov",
-            "dn_array"]
+            "dn_array",
+            "dn_iotags"]
 names_ni = [
             "ni_catm",
             "ni_fov",
@@ -895,7 +870,8 @@ names_ni = [
             "ni_iout",
             "ni_kiout",
             "ni_kcov",
-            "oi_array"]
+            "oi_array",
+            "ni_iotags"]
 
 
 class DN_NIFITS(zdx.Base):
