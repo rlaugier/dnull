@@ -172,8 +172,11 @@ class DN_WAVELENGTH(zdx.Base):
         return cst.c.value/self.lambs
     @property
     def dnus(self):
+        """
+            TODO : this needs to be defined from dlambs instead!
+        """
         assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return jp.gradient(cst.c.value/self.dlambs)
+        return jp.abs(jp.gradient(cst.c.value/self.lambs))
 
 class DN_IOTAGS(zdx.Base):
     """
@@ -575,6 +578,8 @@ DN_FOV_TYPE = Union[DN_FOV, DN_FOV_diam_gau_rad,]
 
 rad2mas = units.rad.to(units.mas)
 mas2rad = units.mas.to(units.rad)
+mas22sr = mas2rad**2
+sr2mas2 = rad2mas**2
 
 
 class DN_PointCollection(object):
@@ -629,6 +634,11 @@ class DN_PointCollection(object):
 
             
 
+    @property
+    def ds_sr(self):
+        return self.ds_mas2 * mas22sr
+        
+    
     @classmethod
     def from_uniform_disk(cls, radius=None,
                         n: int = 10,
@@ -1117,7 +1127,46 @@ class DN_BB(zdx.Base):
         term1 = 2 * jp.exp(jp.log(cst.h.value) + 3*jp.log(nu) - 2*jp.log(cst.c.value))
         term2 = 1/jp.expm1( (cst.h.value*nu) / (cst.k_B.value * self.temperature) )
         return  self.cross_section * self.col_dens * term1 * term2
+    
+    def model_native(self, my_dn_wavel: DN_WAVELENGTH):
+        """
+        Computes B_nu(lambda) at T x opacity but in ph/s.m^-2
+        """
+        wavelengths = my_dn_wavel.lambs
+        dwavel = my_dn_wavel.dlambs
+        nus = my_dn_wavel.nus
+        dnus = my_dn_wavel.dnus
+        photon_energies = cst.h * nus
+        # term1 = 2 * cst.h * nus**3 / cst.c**2
+        term1 = 2 * jp.exp(jp.log(cst.h.value) + 3*jp.log(nus) - 2*jp.log(cst.c.value))
+        term2 = 1/jp.expm1( (cst.h.value*nus) / (cst.k_B.value * self.temperature) )
+        myspecdens = term1 * term2
+        return self.cross_section * self.col_dens * myspecdens * dnus/photon_energies
 
+    def ref_blackbody_native(self, my_dn_wavel):
+        """
+        Returns:
+            blackbody_spectrum: in units consistent with the native
+                units of the file $[a.sr^{-1}.m^{-2}]$ (where [a] is the
+        flux unit used in the file, typically [ph/s]).
+        """
+        myunits = units.ph / units.s
+        from astropy.modeling.models import BlackBody as BB
+        bb = BB(float(self.temperature) * units.K)
+        # Typically given there in erg/Hz/s/sr/cm^2
+        myspectral_density = bb(my_dn_wavel.lambs * units.m)
+        # Photon_energies in J/ph
+        photon_energies = (my_dn_wavel.lambs*units.m).to(
+                            units.J, equivalencies=units.equivalencies.spectral())\
+                                / units.photon
+        dnus = my_dn_wavel.dnus * (units.Hz)
+        print((myspectral_density * dnus / photon_energies).unit)
+        blackbody_spectrum = (myspectral_density * dnus / photon_energies).to(
+                                 (myunits) / units.sr / (units.m**2))
+        return blackbody_spectrum
+
+m2pc = units.m.to(units.pc)
+pc2m = units.pc.to(units.m)
 class DN_Source_BB(zdx.Base):
     locs: DN_PointCollection
     blackbody: DN_BB
@@ -1126,9 +1175,13 @@ class DN_Source_BB(zdx.Base):
         self.locs = locs
         self.blackbody = blackbody
 
-    def irradiance(self, lambs):
-        irrads =  self.blackbody.model(lambs)[:,None]\
-                * jp.ones_like(self.locs.aa)[None,:]
+    def irradiance(self, my_dn_wavel):
+        """
+        returns:
+            irrtad : Irradiant flux density [ph/s/m^2 per spectral channel]
+        """
+        irrads = self.locs.ds_sr[None,:]\
+                * self.blackbody.model_native(my_dn_wavel)[:,None]
         return irrads
 
     @classmethod
@@ -1140,7 +1193,7 @@ class DN_Source_BB(zdx.Base):
                              R_star: float = 1.,
                              T_star: float = 5300,
                              sub_rad: float = 0.5, 
-                             distance: float = 10):
+                             distance: float = 10.):
         r_mas = locs.coord_radial()[0]
         r_au = units.pc.to(units.au) * distance * mas2rad * r_mas
         Teq = T_star*jp.sqrt(R_star/r_au)*(1/4*(1-A_b))**(1/4)
@@ -1718,10 +1771,10 @@ class DN_Observation(zdx.Base):
         preIs = self.get_Is(Es)
         irrads = []
         for asource in sourcelist:
-            irrad = asource.irradiance(self.dn_nifits.dn_wavelength.lambs)
+            irrad = asource.irradiance(self.dn_nifits.dn_wavelength)
             irrads.append(irrad)
         irs = jp.concatenate(irrads, axis=-1)
-        Is = preIs # * irs[None,:,None,:]
+        Is = preIs * irs[None,:,None,:]
 
         if kernels:
             KIs = self.get_KIs(Is)
