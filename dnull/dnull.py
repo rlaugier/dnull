@@ -12,7 +12,7 @@ Main classes:
   mostly matching the objects of nifits.io objects
   should be mostly manipulated by the methods of DN_NIFITS
 """
-from nifits import io
+from nifits.io import niio
 from nifits import backend
 
 from pathlib import Path
@@ -157,7 +157,7 @@ class DN_WAVELENGTH(zdx.Base):
         self.dlambs = dlambs
         self.name = name
     @classmethod
-    def from_nifits(cls, oi_wavelength: io.oifits.OI_WAVELENGTH):
+    def from_nifits(cls, oi_wavelength: niio.OI_WAVELENGTH):
         lambs = jp.asarray(oi_wavelength.lambs, dtype=float)
         dlambs = jp.asarray(oi_wavelength.dlambs, dtype=float)
         name = oi_wavelength.name
@@ -168,28 +168,40 @@ class DN_WAVELENGTH(zdx.Base):
     #     return jp.gradient(self.lambs)
     @property
     def nus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
         return cst.c.value/self.lambs
+
     @property
     def dnus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return jp.gradient(cst.c.value/self.dlambs)
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        return cst.c.value / self.lambs**2 * self.dlambs
+
+    @property
+    def nus_dnus(self):
+        return self.nus, self.dnus
+
 
 class DN_IOTAGS(zdx.Base):
+    """
+        IOTAGS
+    """
     outbright: jp.ndarray
     outdark: jp.ndarray
     outphot: jp.ndarray
-    inpola: np.ndarray
-    outpola: np.ndarray
+    # inpola: np.ndarray
+    # outpola: np.ndarray
 
     def __init__(self, outbright: jp.ndarray, outdark: jp.ndarray, outphot: jp.ndarray,
                 inpola: np.ndarray, outpola: np.ndarray):
+        self.outbright = jp.asarray(outbright, dtype=bool)
         self.outdark = jp.asarray(outdark, dtype=bool)
         self.outphot = jp.asarray(outphot, dtype=bool)
-        self.inpola = np.asarray(inpola, dtype=str)
-        self.outpola = np.asarray(outpola, dtype=str)
+        # self.inpola = np.asarray(inpola, dtype=str)
+        # self.outpola = np.asarray(outpola, dtype=str)
+
     @classmethod
-    def from_nifits(cls, ni_iotags: io.oifits.NI_IOTAGS):
+    def from_nifits(cls, ni_iotags: niio.NI_IOTAGS):
         outbright = jp.asarray(ni_iotags.outbright, dtype=bool)
         outdark = jp.asarray(ni_iotags.outdark, dtype=bool)
         outphot = jp.asarray(ni_iotags.outphot, dtype=bool)
@@ -197,37 +209,6 @@ class DN_IOTAGS(zdx.Base):
         outpola = np.asarray(ni_iotags.outpola, dtype=str)
         return cls(outbright=outbright, outdark=outdark, outphot=outphot,
                 inpola=inpola, outpola=outpola)
-
-    @property
-    def outbright(self):
-        """
-        The flags of bright outputs
-        """
-        return self.outbright
-    @property
-    def outdark(self):
-        """
-        The flags of dark outputs
-        """
-        return self.outdark
-    @property
-    def outphot(self):
-        """
-        The flags of photometric outputs
-        """
-        return self.outphot
-    @property
-    def outpola(self):
-        """
-        The polarization of outputs.
-        """
-        return self.outpola
-    @property
-    def inpola(self):
-        """
-        The polarization of inputs.
-        """
-        return self.inpola
 
 class DN_OSWAVELENGTH(zdx.Base):
     """
@@ -259,25 +240,24 @@ class DN_OSWAVELENGTH(zdx.Base):
         self.dlambs = jp.asarray(dlambs, dtype=float)
         self.name = name
     @classmethod
-    def from_nifits(cls, ni_oswavelength: io.oifits.NI_OSWAVELENGTH):
+    def from_nifits(cls, ni_oswavelength: niio.NI_OSWAVELENGTH):
         lambs = jp.asarray(ni_oswavelength.lambs, dtype=float)
         dlambs = jp.asarray(ni_oswavelength.dlambs, dtype=float)
         name = ni_oswavelength.name
         return cls(lambs=lambs, dlambs=dlambs, name=name)
 
     @property
-    def dlambs(self):
-        return jp.gradient(self.lambs)
-    @property
     def nus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
         return cst.c.value/self.lambs
+
     @property
     def dnus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        return cst.c.value / self.lambs**2 * self.dlambs
 
-DN_TARGET = io.oifits.OI_TARGET
+DN_TARGET = niio.OI_TARGET
 
 class DN_IOUT(zdx.Base):
     iout: jp.ndarray
@@ -288,7 +268,7 @@ class DN_IOUT(zdx.Base):
         self.iout = jp.asarray(iout, dtype=float)
         self.unit = unit
     @classmethod
-    def from_nifits(cls, ni_iout: io.oifits.NI_IOUT):
+    def from_nifits(cls, ni_iout: niio.NI_IOUT):
         iout = jp.asarray(ni_iout.iout, dtype=float)
         unit = ni_iout.unit
         return cls(iout=iout, unit=unit)
@@ -300,7 +280,7 @@ class DN_CATM(zdx.Base):
     def __init__(self, M: DN_CPX):
         self.M = M
     @classmethod
-    def from_nifits(cls, ni_catm: io.oifits.NI_CATM):
+    def from_nifits(cls, ni_catm: niio.NI_CATM):
         M = DN_CPX(ni_catm.M)
         return cls(M=M,)
 
@@ -321,7 +301,7 @@ class DN_CATM_Broadband(zdx.Base):
         myM = jp.mean(dn_catm.M, axis=0)
         return cls(M_broad=myM, nwl=dn_catm.M.shape[0])
     @classmethod
-    def from_nifits(cls, ni_catm: io.oifits.NI_CATM):
+    def from_nifits(cls, ni_catm: niio.NI_CATM):
         myM = jp.mean(ni_catm.M, axis=0)
         return cls(M_broad=myM, nwl=ni_catm.M.shape[0])
 
@@ -335,7 +315,7 @@ class DN_KIOUT(zdx.Base):
     def shape(self):
         return self.kiout.shape
     @classmethod
-    def from_nifits(cls, ni_kiout: io.oifits.NI_KIOUT):
+    def from_nifits(cls, ni_kiout: niio.NI_KIOUT):
         kiout = jp.asarray(ni_kiout.kiout, dtype=float)
         unit=ni_kiout.unit
         return cls(kiout=kiout, unit=unit)
@@ -350,7 +330,7 @@ class DN_WKIOUT(DN_KIOUT):
         self.unit = dn_kiout.unit
         
     def whitened_kiout(self):
-        data = self.data_table["value"].data
+        data = self.data_table["VALUE"].data
         full_shape = data.shape
         flat_full_shape = (full_shape[0], full_shape[1]*full_shape[2])
         flat_out = rearrange(data, "frame wavelength output -> frame (wavelength output)")
@@ -366,7 +346,7 @@ class DN_KCOV(zdx.Base):
         self.kcov = jp.asarray(kcov, dtype=float)
         self.unit = unit
     @classmethod
-    def from_nifits(cls, ni_kcov: io.oifits.NI_KCOV):
+    def from_nifits(cls, ni_kcov: niio.NI_KCOV):
         kcov = jp.asarray(ni_kcov.kcov, dtype=float)
         unit = ni_kcov.unit
         return cls(kcov=kcov, unit=unit)
@@ -376,7 +356,7 @@ class DN_KMAT(zdx.Base):
     def __init__(self, K):
         self.K = jp.asarray(K, dtype=float)
     @classmethod
-    def from_nifits(cls, ni_kmat: io.oifits.NI_KMAT):
+    def from_nifits(cls, ni_kmat: niio.NI_KMAT):
         K = jp.asarray(ni_kmat.K, dtype=float)
         return cls(K)
 
@@ -386,7 +366,7 @@ class DN_DSAMP(zdx.Base):
     def __init__(self, D: jp.ndarray):
         self.D = jp.asarray(D, dtype=float)
     @classmethod
-    def from_nifits(cls, ni_dsamp: io.oifits.NI_DSAMP):
+    def from_nifits(cls, ni_dsamp: niio.NI_DSAMP):
         D = ni_dsamp.D
         return cls(jp.asarray(ni_dsamp.D, dtype=float))
         
@@ -397,7 +377,7 @@ class DN_ARRAY(zdx.Base):
         Temporary, not use
     """
     D: jp.ndarray
-    def __init__(self, ni_dsamp: io.oifits.OI_ARRAY):
+    def __init__(self, ni_dsamp: niio.OI_ARRAY):
         self.D = jp.asarray(ni_dsamp.D, dtype=float)
 
 
@@ -405,41 +385,41 @@ class DN_MOD(zdx.Base):
     time: jp.ndarray
     int_time: jp.ndarray
     mod_phas: DN_CPX
-    app_xy: jp.ndarray
-    arrcol: jp.ndarray
+    ap_xy: jp.ndarray
+    col_ar: jp.ndarray
     fov_index: jp.ndarray
 
     def __init__(self, time=None,
                         int_time=None,
                         mod_phas=None,
-                        app_xy=None,
-                        arrcol=None,
+                        ap_xy=None,
+                        col_ar=None,
                         fov_index=None,
                         clip_length=None):            
         self.time = time
         self.int_time = int_time
         self.mod_phas = mod_phas
-        self.app_xy = app_xy
-        self.arrcol = arrcol
+        self.ap_xy = ap_xy
+        self.col_ar = col_ar
         self.fov_index = fov_index
     @classmethod
-    def from_nifits(cls, ni_mod: io.oifits.NI_MOD=None):            
+    def from_nifits(cls, ni_mod: niio.NI_MOD=None):            
         time = jp.asarray(ni_mod.data_table["TIME"].data,
                                             dtype=float)
         int_time = jp.asarray(ni_mod.int_time, dtype=float)
         mod_phas = DN_CPX(ni_mod.all_phasors)
-        app_xy = jp.asarray(ni_mod.appxy, dtype=float)
-        arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
+        ap_xy = jp.asarray(ni_mod.ap_xy, dtype=float)
+        col_ar = jp.asarray(ni_mod.col_ar, dtype=float)
         fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
                                             dtype=int)
-        return cls(time, int_time, mod_phas, app_xy, arrcol, fov_index)
+        return cls(time, int_time, mod_phas, ap_xy, col_ar, fov_index)
     @classmethod
-    def from_same(cls, ni_mod: io.oifits.NI_MOD=None,
+    def from_same(cls, ni_mod: niio.NI_MOD=None,
                         time=None,
                         int_time=None,
                         mod_phas=None,
-                        app_xy=None,
-                        arrcol=None,
+                        ap_xy=None,
+                        col_ar=None,
                         fov_index=None,
                         clip_length=None):            
         if time is None:
@@ -455,20 +435,20 @@ class DN_MOD(zdx.Base):
             mod_phas = DN_CPX(ni_mod.all_phasors)
         else:
             mod_phas = mod_phas
-        if app_xy is None:
-            app_xy = jp.asarray(ni_mod.appxy, dtype=float)
+        if ap_xy is None:
+            ap_xy = jp.asarray(ni_mod.ap_xy, dtype=float)
         else:
-            app_xy = app_xy
-        if arrcol is None:
-            arrcol = jp.asarray(ni_mod.arrcol, dtype=float)
+            ap_xy = ap_xy
+        if col_ar is None:
+            col_ar = jp.asarray(ni_mod.col_ar, dtype=float)
         else:
-            arrcol = arrcol
+            col_ar = col_ar
         if fov_index is None:
             fov_index = jp.asarray(ni_mod.data_table["FOV_INDEX"].data,
                                             dtype=int)
         else:
             fov_index = fov_index
-        return cls(time, int_time, mod_phas, app_xy, arrcol, fov_index)
+        return cls(time, int_time, mod_phas, ap_xy, col_ar, fov_index)
 
 
     # @classmethodssmethod
@@ -476,13 +456,13 @@ class DN_MOD(zdx.Base):
     #     cls(time=,
     #         int_time=,
     #         mod_phase=,
-    #         app_xy=,
+    #         ap_xy=,
     #         )
         
     
-    @property
-    def appxy(self):
-        return self.app_xy
+    # @property
+    # def ap_xy(self):
+    #     return self.ap_xy
 
     @property
     def n_series(self):
@@ -506,25 +486,25 @@ class DN_MOD(zdx.Base):
     
 
 class DN_FOV(object):
-    def __init__(self, ni_fov: io.oifits.NI_FOV):
+    def __init__(self, ni_fov: niio.NI_FOV):
         """
             This class is a generic class that is identifies and creates the
         corredt DN_FOV class. It will return an object from the correct class instead.
 
         At this point, it can only work with the `diameter_gaussian_radial` mode.
         """
-        if isinstance(ni_fov, io.oifits.NI_FOV):
-            assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
+        if isinstance(ni_fov, niio.NI_FOV):
+            assert ni_fov.header["HIERARCH NIFITS FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
         self = DN_FOV_diam_gau_rad(ni_fov)
     @classmethod
-    def from_nifits(cls, ni_fov: io.oifits.NI_FOV):
+    def from_nifits(cls, ni_fov: niio.NI_FOV):
         """
         Just a pass-through classmethod
         """
         return cls(ni_fov)
 
-    def correct_fov_class(self, ni_fov: io.oifits.NI_FOV):
+    def correct_fov_class(self, ni_fov: niio.NI_FOV):
         """
             This method identifies the correct type of DN_FOV object
         to create, initializes and returns it.
@@ -533,22 +513,39 @@ class DN_FOV(object):
         """
         if isinstance(ni_fov, DN_FOV_diam_gau_rad):
             return DN_FOV_diam_gau_rad
-        assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
+        assert ni_fov.header["HIERARCH NIFITS FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
-        if ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial":
+        if ni_fov.header["HIERARCH NIFITS FOV_MODE"] == "diameter_gaussian_radial":
             return DN_FOV_diam_gau_rad
 
 
 class DN_FOV_diam_gau_rad(zdx.Base):
     D: jp.ndarray
     offset: jp.ndarray
-    def __init__(self, ni_fov: io.oifits.NI_FOV):
-        assert ni_fov.header["FOV_MODE"] == "diameter_gaussian_radial",\
+    def __init__(self, ni_fov: niio.NI_FOV):
+        assert ni_fov.header["HIERARCH NIFITS FOV_MODE"] == "diameter_gaussian_radial",\
                     NotImplementedError("Only diameter_gaussian_radial implemented")
-        D = ni_fov.header["FOV_TELDIAM"]
-        uD = units.Unit(ni_fov.header["FOV_TELDIAM_UNIT"])
+        D = ni_fov.header["HIERARCH NIFITS FOV_TELDIAM"]
+        uD = units.Unit(ni_fov.header["HIERARCH NIFITS FOV_TELDIAM_UNIT"])
         self.D = jp.asarray(D*uD.to(units.m), dtype=float)
-        self.offset = jp.asarray(ni_fov.data_table["offsets"], dtype=float)
+        self.offset = jp.asarray(ni_fov.data_table["OFFSETS"], dtype=float)
+
+    @classmethod
+    def from_diameter(cls, D, lambs):
+        """
+            Create a dn_fov object from a collector diameter
+        
+        Args:
+            D: [m]
+            lambs: [m]
+        """
+        from astropy.io import fits
+        base_header = niio.NI_FOV_DEFAULT_HEADER.copy()
+        base_header["HIERARCH NIFITS FOV_TELDIAM"] = D
+        myni_fov = niio.NI_FOV.simple_from_header(header=base_header,
+                                                    lamb=lambs)
+        return cls(ni_fov=myni_fov)
+        
 
     def fov_function(self, x, y, lambs):
         """
@@ -556,11 +553,25 @@ class DN_FOV_diam_gau_rad(zdx.Base):
 
         Shape: [n_frames n_wavelengths n_points, ]
         """
-        r_0 = (1/2*lambs/self.D)# *units.rad.to(units.mas)
+        r_0 = (2 * lambs/self.D)# *units.rad.to(units.mas)
         r = jp.hypot(x[None, None, :] - self.offset[:,:, 0, None],
                         y[None,None, :] - self.offset[:,:, 1, None])
         phasor = jp.exp(-(r[:,:]/r_0[:,None])**2)
         return phasor.astype(jp.complex64)
+    
+    def fov_pointing_offset_cst_abs(self, x, lambs):
+        """
+        Args :
+            x: The angles [rad] for each telescopes
+            lambs: The wavelengths [m]
+        Returns :
+            amp: the modulus of the phasor
+        """
+
+        y = jp.zeros_like(x)
+        phasor = self.fov_function(x, y, lambs)
+        return jp.abs(phasor.mean(axis=0))
+        
 
 
 
@@ -570,6 +581,8 @@ DN_FOV_TYPE = Union[DN_FOV, DN_FOV_diam_gau_rad,]
 
 rad2mas = units.rad.to(units.mas)
 mas2rad = units.mas.to(units.rad)
+mas22sr = mas2rad**2
+sr2mas2 = rad2mas**2
 
 
 class DN_PointCollection(object):
@@ -624,6 +637,11 @@ class DN_PointCollection(object):
 
             
 
+    @property
+    def ds_sr(self):
+        return self.ds_mas2 * mas22sr
+        
+    
     @classmethod
     def from_uniform_disk(cls, radius=None,
                         n: int = 10,
@@ -634,10 +652,13 @@ class DN_PointCollection(object):
             Create a point collection as a uniformly sampled disk.
 
         Args:
-            a_coords : The array of samples along the first axis
-                  (typically alpha)
-            b_coords : The array of samples along the second axis
-                  (typically beta, the second dimension)
+            radius :   [mas] The angular radius of the disk to model
+            n      :   The total number of points to create
+            phi_0  :   [rad] Arbitrary angle to initialiaze pattern
+            offset :   [mas] An offset of the disk location with respect
+                to the center of the field of view
+            md     :   The numerical module to use as backend
+            unit   :   The unit to use for interactions
 
         **Handles:**
         """
@@ -789,9 +810,10 @@ class DN_PointCollection(object):
         return 
 
     def plot_frame(self, z=None, frame_index=0, wl_index=0,
-                        out_index=0, mycmap=None, marksize_increase=1.0,
-                        colorbar=True, xlabel=True, title=True,
-                        whitened=False):
+                   out_index=0, mycmap=None, marksize_increase=1.0,
+                   colorbar=True, xlabel=True, ylabel=True,
+                   title=True,
+                   orientation_RA_DEC=True):
         """
             A convenience method to plot values of the point collection
         spatially.
@@ -805,37 +827,50 @@ class DN_PointCollection(object):
             marksize_increase :
             colorbar : 
             xlabel : 
-            title :
-            whitened : if True, then out_index is used and wl_index is moot.
-            
+            ylabel : 
+            title : 
+            orientation_RA_DEC : (`True`) if `True`, then inverse the x axis
+                                to have East (positive RA) on the left of plot.            
         """
         import matplotlib.pyplot as plt
-        marksize = marksize_increase * 50000/self.shape[0]
-        if whitened:
-            zframe = z[frame_index, out_index, :]
+        marksize = marksize_increase * 50000 / self.shape[0]
+        if len(z.shape) == len(self.orig_shape):
+            myframe = z
         else:
-            zframe = z[frame_index,wl_index,out_index,:]
+            myframe = get_frame(z, frame_index=frame_index, wl_index=wl_index, out_index=out_index)
         if len(self.orig_shape) == 1:
-            plt.scatter(*self.coords, c=zframe,
-                    cmap=mycmap, s=marksize)
+            plt.scatter(*self.coords, c=myframe,
+                        cmap=mycmap, s=marksize)
             plt.gca().set_aspect("equal")
         else:
-            plt.imshow(zframe.reshape((self.orig_shape)),
-                cmap=mycmap, extent=self.extent)
+            plt.imshow(myframe.reshape((self.orig_shape)),
+                       cmap=mycmap, extent=self.extent)
             plt.gca().set_aspect("equal")
-            
+
         if colorbar:
             plt.colorbar()
-        if xlabel is True:
-            plt.xlabel("Relative position [mas]")
-        elif xlabel is not False:
-            plt.xlabel(xlabel)
         if title is True:
             plt.title(f"Output {out_index} for frame {frame_index}")
         elif title is not False:
             plt.title(title)
+        if orientation_RA_DEC:
+            plt.gca().invert_xaxis()
+            leftlabel = "E"
+            rightlabel = "W"
+        else :
+            leftlabel = "W"
+            rightlabel = "E"
+        if xlabel is True:
+            plt.xlabel(f"< {leftlabel}       Relative R.A. [mas]       {rightlabel} >")
+        elif xlabel is not False:
+            plt.xlabel(xlabel)
+        if ylabel is True:
+            plt.ylabel("< S       Relative Dec. [mas]       N >")
+        elif ylabel is not False:
+            plt.ylabel(ylabel)
 
-
+def get_frame(z, frame_index=0, wl_index=0, out_index=0):
+    return z[frame_index, wl_index, out_index, :]
 
 def test_attr(obj, name):
     if hasattr(obj, name):
@@ -853,7 +888,8 @@ names_dn = [
             "dn_iout",
             "dn_kiout",
             "dn_kcov",
-            "dn_array"]
+            "dn_array",
+            "dn_iotags"]
 names_ni = [
             "ni_catm",
             "ni_fov",
@@ -864,7 +900,8 @@ names_ni = [
             "ni_iout",
             "ni_kiout",
             "ni_kcov",
-            "oi_array"]
+            "oi_array",
+            "ni_iotags"]
 
 
 class DN_NIFITS(zdx.Base):
@@ -986,12 +1023,15 @@ class DN_NIFITS(zdx.Base):
                     print("Updating ", dnname)
                     extensions[dnname] = theinput
 
-        extensions["catm_realimag"] = catm_realimag
+        # extensions["catm_realimag"] = catm_realimag
         print(extensions)
         return cls(**extensions)
 
     @classmethod
     def switch_cpx(cls, adnull, catm_realimag=False):
+        """
+            Switches the CATM from a real-ima
+        """
         if catm_realimag:
             myM = DN_CPX(adnull.dn_catm.M.cpx)
         else:
@@ -1090,18 +1130,59 @@ class DN_BB(zdx.Base):
         term1 = 2 * jp.exp(jp.log(cst.h.value) + 3*jp.log(nu) - 2*jp.log(cst.c.value))
         term2 = 1/jp.expm1( (cst.h.value*nu) / (cst.k_B.value * self.temperature) )
         return  self.cross_section * self.col_dens * term1 * term2
+    
+    def model_native(self, nus, dnus):# my_dn_wavel: DN_WAVELENGTH):
+        """
+        Computes B_nu(lambda) at T x opacity but in ph/s.m^-2
+        """
+        photon_energies = cst.h.value * nus
+        # term1 = 2 * cst.h * nus**3 / cst.c**2
+        term1 = 2 * jp.exp(jp.log(cst.h.value) + 3*jp.log(nus) - 2*jp.log(cst.c.value))
+        term2 = 1/jp.expm1( (cst.h.value*nus) / (cst.k_B.value * self.temperature) )
+        myspecdens = term1 * term2
+        return self.cross_section * self.col_dens * myspecdens * dnus/photon_energies
 
+    def ref_blackbody_native(self, my_dn_wavel):
+        """
+        Returns:
+            blackbody_spectrum: in units consistent with the native
+                units of the file $[a.sr^{-1}.m^{-2}]$ (where [a] is the
+        flux unit used in the file, typically [ph/s]).
+        """
+        myunits = units.ph / units.s
+        from astropy.modeling.models import BlackBody as BB
+        bb = BB(float(self.temperature) * units.K)
+        # Typically given there in erg/Hz/s/sr/cm^2
+        myspectral_density = bb(my_dn_wavel.lambs * units.m)
+        # Photon_energies in J/ph
+        photon_energies = (my_dn_wavel.lambs*units.m).to(
+                            units.J, equivalencies=units.equivalencies.spectral())\
+                                / units.photon
+        dnus = my_dn_wavel.dnus * (units.Hz)
+        print((myspectral_density * dnus / photon_energies).unit)
+        blackbody_spectrum = (myspectral_density * dnus / photon_energies).to(
+                                 (myunits) / units.sr / (units.m**2))
+        return blackbody_spectrum
+
+m2pc = units.m.to(units.pc)
+pc2m = units.pc.to(units.m)
 class DN_Source_BB(zdx.Base):
     locs: DN_PointCollection
     blackbody: DN_BB
     def __init__(self, locs: DN_PointCollection,
                     blackbody: DN_BB):
         self.locs = locs
-        self.blackbody = DN_BB
+        self.blackbody = blackbody
 
-    @property
-    def irradiance(self):
-        pass
+    def irradiance(self, nus, dnus):
+        """
+        returns:
+            irrtad : Irradiant flux density [ph/s/m^2 per spectral channel]
+        """
+        irrads = self.locs.ds_sr[None,:]\
+                * self.blackbody.model_native(nus, dnus)[:,None]
+        return irrads
+
     @classmethod
     def radial_from_bond_albedo(cls, locs, transformation,
                              cross_section: jp.ndarray = None,
@@ -1111,7 +1192,7 @@ class DN_Source_BB(zdx.Base):
                              R_star: float = 1.,
                              T_star: float = 5300,
                              sub_rad: float = 0.5, 
-                             distance: float = 10):
+                             distance: float = 10.):
         r_mas = locs.coord_radial()[0]
         r_au = units.pc.to(units.au) * distance * mas2rad * r_mas
         Teq = T_star*jp.sqrt(R_star/r_au)*(1/4*(1-A_b))**(1/4)
@@ -1123,15 +1204,15 @@ class DN_Source_BB(zdx.Base):
     @classmethod
     def uniform_disk(cls, locs, transformation,
                      cross_section: jp.ndarray = None,
-                     T_eff: float = 5300,
-                     distance: float = 10):
+                     T_eff: float = 5300.,
+                     distance: float = 10.):
         mybb = DN_BB(T_eff, cross_section=cross_section,
                             col_dens=None)
         return cls(locs, mybb)
 
 class DN_Source_Base(zdx.Base):
     locs: DN_PointCollection
-    irradiance: jp.ndarray
+    airradiance: jp.ndarray
 
     def __init__(self, locs, irradiance):
         self.locs = locs
@@ -1203,7 +1284,80 @@ class SourceList(zdx.Base):
             raise AttributeError(f"{key} not in {self.sources.keys()}")
 
 
-        
+class DN_OffsetPhasor(zdx.Base):
+    piston_offset : jp.ndarray
+    pointing : jp.ndarray
+    fov_obj : DN_FOV_diam_gau_rad
+    static_throughput : jp.ndarray
+    total_eff : jp.ndarray
+    """
+    A class to define a simple constant error on the same elements
+    as DN_ErrorPhasorPiston Pointing
+    """
+
+    def __init__(self, piston, pointing, fov_obj,total_eff=1.0e-3):
+        self.piston_offset = jp.asarray(piston, dtype=float)
+        self.pointing = jp.asarray(pointing, dtype=float)
+        # self.fourDsquare = 4*D**2
+        self.fov_obj = fov_obj
+        self.static_throughput = jp.ones(self.pointing.shape, dtype=jp.float32)
+        self.total_eff = jp.asarray(total_eff)
+
+    def phasor(self, lambs):
+        """
+        The effect of pointing can be modeled as such:
+        ```python
+            import sympy as sp
+            r, r_0, lamb_s, D = sp.symbols("r,r_0, lambda, D", real=True, positive=True)
+            e = sp.exp(-(r/r_0)**2)
+            e_series = sp.series(e.subs([(r_0, 1/2*lamb_s/D)]), r, n=4)
+            sp.print_latex(e_series)
+            e_series
+        ```
+        $ A(\\lambda) = 1 - \\frac{4.0 D^{2} r^{2}}{\\lambda^{2}} + O\\left(r^{4}\\right) $
+        """
+        # amp = (1 - self.fourDsquare / lambs[None,:,None]**2
+        #                 * self.pointing[None,None,:]**2)
+        amp = jp.sqrt(jp.abs(self.static_throughput[None,None,:]))\
+            * self.total_eff\
+            * self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)[None,:,:]
+        phase = self.piston_offset[None,None,:] * 2 * jp.pi / lambs[None,:,None]
+        return amp[:,:,:] * jp.exp(1j * phase)
+
+    def single_phasor(self, lambs, index):
+        """
+        Args:
+            lambs: [m]
+            index: 
+        """
+        # amp = (1 - self.fourDsquare / lambs[:,None]**2
+        #                 * self.pointing[None,:]**2)
+        amp = jp.sqrt(jp.abs(self.static_throughput[None,:]))\
+            * self.total_eff\
+            * self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)
+        phase = self.piston_offset[None,:] * 2 * jp.pi / lambs[:,None]
+        return amp[:,:] * jp.exp(1j * phase)
+
+    @classmethod
+    def no_error(cls, mydn, fov_obj=None, D=None, lambs=None):
+        """
+        Creates a neutral error vector
+
+        Args:
+            mydn : a DN_NIFITS object to use for the shape of the arrays.
+            D    : The main collector diameter
+        """
+        nwl = mydn.dn_wavelength.lambs.shape
+        # n_frams = mydn.dn_mod.n_series
+        n_inputs = mydn.dn_mod.all_phasors.shape[-1]
+        piston = jp.zeros((n_inputs,))
+        pointing = jp.zeros((n_inputs,))
+        if fov_obj is None:
+            fov_obj = DN_FOV_diam_gau_rad.from_diameter(D,lambs)
+        myobj = cls(piston=piston,
+                    pointing=pointing,
+                    fov_obj=fov_obj)
+        return myobj
 
 class DN_ErrorPhasorPistonPointing(zdx.Base):
     """
@@ -1213,7 +1367,7 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
     pointing error and the associated chromatic injection amplitude.
     """
     piston : jp.ndarray
-    pointing : jp.ndarray
+    pointing : jp.ndarray #  pointing in microrad !!!
     fourDsquare : jp.float32
 
     def __init__(self, piston, pointing, D):
@@ -1234,16 +1388,18 @@ class DN_ErrorPhasorPistonPointing(zdx.Base):
         ```
         $ A(\\lambda) = 1 - \\frac{4.0 D^{2} r^{2}}{\\lambda^{2}} + O\\left(r^{4}\\right) $
         """
-        amp = (1 - self.fourDsquare / lambs[None,:,None]**2
-                        * self.pointing[:,None,:]**2)
+        adrop = self.fourDsquare / lambs[None,:,None]**2\
+                        * (1e-6*self.pointing[:,None,:])**2
+        amp = (1 - jp.clip(adrop, 0.0, 1.0))
         phase = self.piston[:,None,:] * 2 * jp.pi / lambs[None,:,None]
         return amp[:,:,:] * jp.exp(1j * phase)
 
     def single_phasor(self, lambs, index):
         """
         """
-        amp = (1 - self.fourDsquare / lambs[:,None]**2
-                        * self.pointing[None,:]**2)
+        adrop = self.fourDsquare / lambs[:,None]**2\
+                        * (1e-6*self.pointing[None,:])**2
+        amp = (1 - jp.clip(adrop, 0.0, 1.0))
         phase = self.piston[None,:] * 2 * jp.pi / lambs[:,None]
         return amp[:,:] * jp.exp(1j * phase)
 
@@ -1444,7 +1600,7 @@ class DN_Observation(zdx.Base):
         self.error_phasor = error_phasor
 
 
-    def geometric_phasor(self, sourcelist):
+    def geometric_phasor(self, sourcelist, irrad=False):
         """
         Returns the complex phasor corresponding to the locations
         of the family of sources
@@ -1463,17 +1619,21 @@ class DN_Observation(zdx.Base):
         for asource in sourcelist:
             alphas, betas = asource.locs.coords_rad
             ds_mas2 = asource.locs.ds_mas2
-            xy_array = jp.array(self.dn_nifits.dn_mod.appxy)
+            xy_array = jp.array(self.dn_nifits.dn_mod.ap_xy)
             lambs = jp.array(self.dn_nifits.dn_wavelength.lambs)
             k = 2*jp.pi/lambs
             a = jp.array((alphas, betas), dtype=jp.float32)
-            phi = k[:,None,None,None] * jp.einsum("t a x, x m -> t a m", xy_array[:,:,:], a[:,:])
-            b = jp.exp(1j*phi)
+            phi = - k[:,None,None,None] * jp.einsum("t a x, x m -> t a m", xy_array[:,:,:], a[:,:])
+            if irrad:
+                ir = asource.irradiance(*self.dn_nifits.dn_wavelength.nus_dnus)
+                b = np.sqrt(ir)[:,None,None,None] * jp.exp(1j*phi)
+            else:
+                b = jp.exp(1j*phi)
             allbs.append(b)
         bs = jp.concatenate(allbs, axis=-1)
         return bs.transpose((1,0,2,3))
 
-    def single_geometric_phasor(self, sourcelist, index):
+    def single_geometric_phasor(self, sourcelist, index, irrad=False):
         """
         Returns the complex phasor corresponding to the locations
         of the family of sources
@@ -1492,12 +1652,16 @@ class DN_Observation(zdx.Base):
         for asource in sourcelist:
             alphas, betas = asource.locs.coords_rad_single(index)
             ds_mas2 = asource.locs.ds_mas2
-            xy_array = jp.array(self.dn_nifits.dn_mod.appxy[index])
+            xy_array = jp.array(self.dn_nifits.dn_mod.ap_xy[index])
             lambs = jp.array(self.dn_nifits.dn_wavelength.lambs)
             k = 2*jp.pi/lambs
             a = jp.array((alphas, betas), dtype=jp.float32)
-            phi = k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:], a[:,:])
-            b = jp.exp(1j*phi)
+            phi = - k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:], a[:,:])
+            if irrad:
+                ir = asource.irradiance(*self.dn_nifits.dn_wavelength.nus_dnus)
+                b = np.sqrt(ir)[:,None,None] * jp.exp(1j*phi)
+            else:
+                b = jp.exp(1j*phi)
             allbs.append(b)
         bs = jp.concatenate(allbs, axis=-1)
         return bs.transpose((1,0,2,3))
@@ -1509,7 +1673,7 @@ class DN_Observation(zdx.Base):
         
         """
         raw_mods = jp.array(self.dn_nifits.dn_mod.all_phasors)
-        col_area = jp.array(self.dn_nifits.dn_mod.arrcol)
+        col_area = jp.array(self.dn_nifits.dn_mod.col_ar)
         err_phas = self.error_phasor.phasor(self.dn_nifits.dn_wavelength.lambs)
         mods = err_phas * raw_mods * jp.sqrt(col_area)[:,None,:]
         return mods
@@ -1520,7 +1684,7 @@ class DN_Observation(zdx.Base):
         
         """
         raw_mods = jp.array(self.dn_nifits.dn_mod.all_phasors[index])
-        col_area = jp.array(self.dn_nifits.dn_mod.arrcol[index])
+        col_area = jp.array(self.dn_nifits.dn_mod.col_ar[index])
         mods = raw_mods * jp.sqrt(col_area)[None,:]
         return mods[None,:,:]
 
@@ -1549,12 +1713,12 @@ class DN_Observation(zdx.Base):
         # TODO: inefficient: ideally compute only the needed one.
         return gs[index,:,:][None, :,:]
 
-    def get_Is(self, xs):
+    def get_Is(self, xs, sourcelist=None):
         """
         Get intensity from an array of sources.
 
         """
-        E = jp.einsum("w o i , t w i m -> t w o m", self.dn_nifits.dn_catm.M.cpx, xs)
+        E = jp.einsum("woi,twim->twom", self.dn_nifits.dn_catm.M.cpx, xs)
         I = jp.abs(E)**2
         return I
 
@@ -1611,7 +1775,14 @@ class DN_Observation(zdx.Base):
         
         # this is actually a collecting area
         Es = xs * x_inj[:,:,None,:] * x_mod[:,:,:,None]
-        Is = self.get_Is(Es)
+        preIs = self.get_Is(Es)
+        irrads = []
+        for asource in sourcelist:
+            irrad = asource.irradiance(*self.dn_nifits.dn_wavelength.nus_dnus)
+            irrads.append(irrad)
+        irs = jp.concatenate(irrads, axis=-1)
+        Is = preIs * irs[None,:,None,:]
+
         if kernels:
             KIs = self.get_KIs(Is)
             return self.downsample(KIs)
@@ -2095,8 +2266,10 @@ nott_arg_dict = {
 class CalibSetup(DN_Observation):
     var_vec: DN_NOTT_LDC_series
     background: jp.ndarray
+    variance: jp.ndarray
     def __init__(self, dn_nifits, dn_nuisance, dn_interest,
-                        error_phasor, var_vec, background):
+                        error_phasor, var_vec, background,
+                        variance):
         self.dn_nifits = dn_nifits
         self.nuisance = dn_nuisance
         self.interest = dn_interest
@@ -2104,6 +2277,7 @@ class CalibSetup(DN_Observation):
         self.error_phasor = error_phasor
         self.var_vec = var_vec
         self.background = background
+        self.variance = variance
 
 
     @classmethod
@@ -2122,8 +2296,8 @@ class CalibSetup(DN_Observation):
         daytime=None,
         int_time=None,
         dateobs=None,
-        appxy=None,
-        arrcol=None,
+        ap_xy=None,
+        col_ar=None,
         fov_index=None
     ):
         import astropy.units as units
@@ -2137,15 +2311,15 @@ class CalibSetup(DN_Observation):
             from astropy.time import Time
             dateobs = Time(dateobs) + times_relative * units.s
         int_time = dt * jp.ones(mylen)
-        app_xy = self.dn_nifits.dn_mod.app_xy[0,:,:] * jp.ones(mylen)[:,None,None]
-        arrcol = self.dn_nifits.dn_mod.arrcol[0,:] * jp.ones(mylen)[:,None]
+        ap_xy = self.dn_nifits.dn_mod.ap_xy[0,:,:] * jp.ones(mylen)[:,None,None]
+        col_ar = self.dn_nifits.dn_mod.col_ar[0,:] * jp.ones(mylen)[:,None]
         fov_index = self.dn_nifits.dn_mod.fov_index[0] * jp.ones(mylen)
         entries = {
             "time": times_relative,
             "int_time": int_times,
             "mod_phas": self.var_vec.phasor(lambs),
-            "app_xy": app_xy,
-            "arrcol": arrcol,
+            "ap_xy": ap_xy,
+            "col_ar": col_ar,
             "fov_index": fov_index
         }
         self.dn_nifits = self.dn_nifits.dn_mod.update(entries)
@@ -2165,24 +2339,34 @@ class CalibSetup(DN_Observation):
         return {"var_vec": myldc_list}
 
         
-
-    def residual_outs_nuisance(self):
+    def signal_outs_nuisance(self, verbose=False):
         """
         Residual of observation with all outputs.
         """
         outs_model = self.get_total_outs([self.nuisance], kernels=False)
-        res = jp.sum((outs_model + self.background[None,:,:] - self.dn_nifits.dn_iout.iout)**2/ self.var_vec)
+        res = jp.sum((outs_model + self.background[None,:,:] )**2/ self.variance)
+        if verbose:
+            return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
         return res
-
-    def residual_outs_nuisance_outputs(self, output):
+    def residual_outs_nuisance(self, verbose=False):
         """
         Residual of observation with all outputs.
         """
         outs_model = self.get_total_outs([self.nuisance], kernels=False)
-        res = jp.sum((outs_model + self.background[None,:,:] - output)**2/ self.var_vec)
+        res = jp.sum((outs_model + self.background[None,:,:] - self.dn_nifits.dn_iout.iout)**2/ self.variance)
+        if verbose:
+            return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
         return res
-        
-        
+
+    def residual_outs_nuisance_outputs(self, output, verbose=False):
+        """
+        Residual of observation with all outputs.
+        """
+        outs_model = self.get_total_outs([self.nuisance], kernels=False)
+        res = jp.sum((outs_model + self.background[None,:,:] - output)**2/ self.variance)
+        if verbose:
+            return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
+        return res
 
     @classmethod
     def create_nifits(cls, ):
@@ -2199,7 +2383,7 @@ def hadamard_modulation(ntel, amp, drop_common=True):
     Returns a hadamard matrix of given 
     """
     import scipy as scp
-    mat = scp.linalg.hadamard(4)
+    mat = scp.linalg.hadamard(ntel)
     if drop_common:
         mat = mat[1:,:]
     return mat*amp
@@ -2361,7 +2545,8 @@ def build_branch(myobj, aname, modules=["dnull.dnull"], thegraph=None, parent=No
                 # print(childobj.__dict__)
                 print(f"-> Calling for {akey}")
                 print(f"Class = {childobj.__class__}")
-            build_branch(childobj, akey, modules, thegraph,
+            if akey not in ["__doc__", "__module__", "__annotations__"]:
+                build_branch(childobj, akey, modules, thegraph,
                         parent=myname, verbose=verbose,
                         absolute_path=prefix)
     if parent is None:
