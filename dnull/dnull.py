@@ -168,15 +168,19 @@ class DN_WAVELENGTH(zdx.Base):
     #     return jp.gradient(self.lambs)
     @property
     def nus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
         return cst.c.value/self.lambs
+
     @property
     def dnus(self):
-        """
-            TODO : this needs to be defined from dlambs instead!
-        """
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        return cst.c.value / self.lambs**2 * self.dlambs
+
+    @property
+    def nus_dnus(self):
+        return self.nus, self.dnus
+
 
 class DN_IOTAGS(zdx.Base):
     """
@@ -243,16 +247,15 @@ class DN_OSWAVELENGTH(zdx.Base):
         return cls(lambs=lambs, dlambs=dlambs, name=name)
 
     @property
-    def dlambs(self):
-        return jp.gradient(self.lambs)
-    @property
     def nus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
         return cst.c.value/self.lambs
+
     @property
     def dnus(self):
-        assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
-        return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        # assert cst.c.unit == units.m/units.s, f"c has units {cst.c.unit}"
+        # return jp.abs(jp.gradient(cst.c.value/self.lambs))
+        return cst.c.value / self.lambs**2 * self.dlambs
 
 DN_TARGET = niio.OI_TARGET
 
@@ -1128,15 +1131,11 @@ class DN_BB(zdx.Base):
         term2 = 1/jp.expm1( (cst.h.value*nu) / (cst.k_B.value * self.temperature) )
         return  self.cross_section * self.col_dens * term1 * term2
     
-    def model_native(self, my_dn_wavel: DN_WAVELENGTH):
+    def model_native(self, nus, dnus):# my_dn_wavel: DN_WAVELENGTH):
         """
         Computes B_nu(lambda) at T x opacity but in ph/s.m^-2
         """
-        wavelengths = my_dn_wavel.lambs
-        dwavel = my_dn_wavel.dlambs
-        nus = my_dn_wavel.nus
-        dnus = my_dn_wavel.dnus
-        photon_energies = cst.h * nus
+        photon_energies = cst.h.value * nus
         # term1 = 2 * cst.h * nus**3 / cst.c**2
         term1 = 2 * jp.exp(jp.log(cst.h.value) + 3*jp.log(nus) - 2*jp.log(cst.c.value))
         term2 = 1/jp.expm1( (cst.h.value*nus) / (cst.k_B.value * self.temperature) )
@@ -1175,13 +1174,13 @@ class DN_Source_BB(zdx.Base):
         self.locs = locs
         self.blackbody = blackbody
 
-    def irradiance(self, my_dn_wavel):
+    def irradiance(self, nus, dnus):
         """
         returns:
             irrtad : Irradiant flux density [ph/s/m^2 per spectral channel]
         """
         irrads = self.locs.ds_sr[None,:]\
-                * self.blackbody.model_native(my_dn_wavel)[:,None]
+                * self.blackbody.model_native(nus, dnus)[:,None]
         return irrads
 
     @classmethod
@@ -1213,7 +1212,7 @@ class DN_Source_BB(zdx.Base):
 
 class DN_Source_Base(zdx.Base):
     locs: DN_PointCollection
-    irradiance: jp.ndarray
+    airradiance: jp.ndarray
 
     def __init__(self, locs, irradiance):
         self.locs = locs
@@ -1289,16 +1288,20 @@ class DN_OffsetPhasor(zdx.Base):
     piston_offset : jp.ndarray
     pointing : jp.ndarray
     fov_obj : DN_FOV_diam_gau_rad
+    static_throughput : jp.ndarray
+    total_eff : jp.ndarray
     """
     A class to define a simple constant error on the same elements
     as DN_ErrorPhasorPiston Pointing
     """
 
-    def __init__(self, piston, pointing, fov_obj):
+    def __init__(self, piston, pointing, fov_obj,total_eff=1.0e-3):
         self.piston_offset = jp.asarray(piston, dtype=float)
         self.pointing = jp.asarray(pointing, dtype=float)
         # self.fourDsquare = 4*D**2
         self.fov_obj = fov_obj
+        self.static_throughput = jp.ones(self.pointing.shape, dtype=jp.float32)
+        self.total_eff = jp.asarray(total_eff)
 
     def phasor(self, lambs):
         """
@@ -1315,7 +1318,9 @@ class DN_OffsetPhasor(zdx.Base):
         """
         # amp = (1 - self.fourDsquare / lambs[None,:,None]**2
         #                 * self.pointing[None,None,:]**2)
-        amp = self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)[None,:,:]
+        amp = jp.sqrt(jp.abs(self.static_throughput[None,None,:]))\
+            * self.total_eff\
+            * self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)[None,:,:]
         phase = self.piston_offset[None,None,:] * 2 * jp.pi / lambs[None,:,None]
         return amp[:,:,:] * jp.exp(1j * phase)
 
@@ -1327,7 +1332,9 @@ class DN_OffsetPhasor(zdx.Base):
         """
         # amp = (1 - self.fourDsquare / lambs[:,None]**2
         #                 * self.pointing[None,:]**2)
-        amp = self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)
+        amp = jp.sqrt(jp.abs(self.static_throughput[None,:]))\
+            * self.total_eff\
+            * self.fov_obj.fov_pointing_offset_cst_abs(self.pointing, lambs)
         phase = self.piston_offset[None,:] * 2 * jp.pi / lambs[:,None]
         return amp[:,:] * jp.exp(1j * phase)
 
@@ -1618,7 +1625,7 @@ class DN_Observation(zdx.Base):
             a = jp.array((alphas, betas), dtype=jp.float32)
             phi = - k[:,None,None,None] * jp.einsum("t a x, x m -> t a m", xy_array[:,:,:], a[:,:])
             if irrad:
-                ir = asource.irradiance(self.dn_nifits.dn_wavelength.lambs)
+                ir = asource.irradiance(*self.dn_nifits.dn_wavelength.nus_dnus)
                 b = np.sqrt(ir)[:,None,None,None] * jp.exp(1j*phi)
             else:
                 b = jp.exp(1j*phi)
@@ -1651,7 +1658,7 @@ class DN_Observation(zdx.Base):
             a = jp.array((alphas, betas), dtype=jp.float32)
             phi = - k[:,None,None,None] * jp.einsum("a x, x m -> a m", xy_array[:,:], a[:,:])
             if irrad:
-                ir = asource.irradiance(self.dn_nifits.dn_wavelength.lambs)
+                ir = asource.irradiance(*self.dn_nifits.dn_wavelength.nus_dnus)
                 b = np.sqrt(ir)[:,None,None] * jp.exp(1j*phi)
             else:
                 b = jp.exp(1j*phi)
@@ -1771,7 +1778,7 @@ class DN_Observation(zdx.Base):
         preIs = self.get_Is(Es)
         irrads = []
         for asource in sourcelist:
-            irrad = asource.irradiance(self.dn_nifits.dn_wavelength)
+            irrad = asource.irradiance(*self.dn_nifits.dn_wavelength.nus_dnus)
             irrads.append(irrad)
         irs = jp.concatenate(irrads, axis=-1)
         Is = preIs * irs[None,:,None,:]
@@ -2332,7 +2339,15 @@ class CalibSetup(DN_Observation):
         return {"var_vec": myldc_list}
 
         
-
+    def signal_outs_nuisance(self, verbose=False):
+        """
+        Residual of observation with all outputs.
+        """
+        outs_model = self.get_total_outs([self.nuisance], kernels=False)
+        res = jp.sum((outs_model + self.background[None,:,:] )**2/ self.variance)
+        if verbose:
+            return outs_model + self.background[None,:,:], self.dn_nifits.dn_iout.iout
+        return res
     def residual_outs_nuisance(self, verbose=False):
         """
         Residual of observation with all outputs.
@@ -2368,7 +2383,7 @@ def hadamard_modulation(ntel, amp, drop_common=True):
     Returns a hadamard matrix of given 
     """
     import scipy as scp
-    mat = scp.linalg.hadamard(4)
+    mat = scp.linalg.hadamard(ntel)
     if drop_common:
         mat = mat[1:,:]
     return mat*amp
